@@ -4,7 +4,7 @@ from birdnet import SpeciesPredictions, predict_species_within_audio_file
 
 YELLOWHAMMER_ID = 'Emberiza citrinella_Yellowhammer'
 MIN_CONFIDENCE_TRESHOLD = 0.4
-OVERLAP_TRESH = 1.5
+OVERLAP_TRESH = 2.5
 
 
 def merge_overlaps(detections: list[tuple[float, float, float]]):
@@ -44,6 +44,7 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
     predictions = SpeciesPredictions(predict_species_within_audio_file( audio_path, 
         min_confidence=MIN_CONFIDENCE_TRESHOLD,
         chunk_overlap_s=OVERLAP_TRESH,
+        batch_size=16,
         species_filter={yellowhammer_id}
     ))
 
@@ -72,8 +73,8 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
 
 
 
-if __name__ == "__main__":
-    print(
-        get_yellowhammers('../.tstdata/F002413.wav')
-    )
+# if __name__ == "__main__":
+#     print(
+#         get_yellowhammers('../.tstdata/F002413.wav')
+#     )
     
