@@ -54,7 +54,7 @@ def normalize_audio(in_bytes: bytes) -> bytes:
         f"aresample={SAMPLE_RATE},"
         "pan=mono|c0=.5*c0+.5*c1,"
         "highpass=f=3500,"
-        "lowpass=f=8000"
+        "lowpass=f=8500"
     )
     return ffmpeg_filter(in_bytes, filters, output_format="wav")
 

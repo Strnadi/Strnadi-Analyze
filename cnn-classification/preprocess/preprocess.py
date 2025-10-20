@@ -29,9 +29,28 @@ def preprocess(fp:str):
     return samples
 
 
-# if __name__ == '__main__':
-#     samples = preprocess('.tstdata/F000252.wav')
-#     for s in samples:
-#         spectrogram.plot_mel_spect(
-#             spectrogram.mel_spectrogram(s)
-#         )
+def make_spects(samples) -> list[np.ndarray]:
+    '''
+    return list of spectrograms - 2d np NDArray - shape: (128, 376)
+    all input samples should be PCM < -1; 1 > 48kHz mono np.ndarrays
+    '''
+    SHAPE = (128, 376)
+    spects = []
+    for s in samples:
+        spects.append(
+            spectrogram.mel_spectrogram(s)
+        )
+        if(spects[-1].shape != SHAPE): raise Exception("invalid spectrogram shape")
+
+    return spects
+
+
+if __name__ == '__main__':
+    samples = preprocess('.tstdata/F003716.wav')
+    spects = make_spects(samples)
+    for s in spects:
+        
+        print(s.shape)
+        spectrogram.plot_mel_spect(
+            s
+        )
