@@ -1,4 +1,5 @@
 ffmpeg-python
 tensorflow[and-cuda]
 librosa
-numpy
+matplotlib
+scikit-learn
