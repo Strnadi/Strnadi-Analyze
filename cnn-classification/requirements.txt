@@ -1,5 +1,8 @@
+keras
+torch
+torchvision
+torchaudio
 ffmpeg-python
-tensorflow[and-cuda]
 librosa
 matplotlib
 scikit-learn
