@@ -2,6 +2,7 @@ keras
 torch
 torchvision
 torchaudio
+torchcodec
 ffmpeg-python
 librosa
 matplotlib
