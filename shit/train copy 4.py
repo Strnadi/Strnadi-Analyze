@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 BATCH_SIZE = 8
 SAMPLE_RATE = 32000
 EPOCHS = 50
-SAMPLE_SECONDS = 5
+SAMPLE_SECONDS = 3.5
 AUDIO_EXTENSIONS = [".wav", ".mp3", ".flac", ".ogg", ".aiff"]
 directory = "/home/hroudis/strnad-data"
 
