@@ -37,10 +37,10 @@ def mel_spectrogram(samples: np.ndarray, sr: int = 48000, n_fft=1024, hop_length
 
 
 
-def plot_mel_spect(spect):
+def plot_mel_spect(spect, title="Mel Spectrogram"):
     plt.figure(figsize=(10,4))
     librosa.display.specshow(spect, sr=48000, hop_length=512, x_axis='time', y_axis='mel', cmap='magma')
     plt.colorbar(format='%+2.0f dB')
-    plt.title("Mel Spectrogram")
+    plt.title(title)
     plt.tight_layout()
     plt.show()

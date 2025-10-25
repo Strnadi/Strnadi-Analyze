@@ -1,8 +1,9 @@
-import birdnet_preprocess_interface
-import wav_helper
+from . import birdnet_preprocess_interface
+from . import wav_helper
+from . import spectrogram
+
 import numpy as np
 
-import spectrogram
 
 def preprocess(fp:str):
     WAV_END_ADD = 1
