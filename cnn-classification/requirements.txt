@@ -7,4 +7,6 @@ matplotlib
 pydot
 noisereduce
 ffmpeg-python
-tensorflow[and-cuda]
+tensorflow
+fastapi
+uvicorn

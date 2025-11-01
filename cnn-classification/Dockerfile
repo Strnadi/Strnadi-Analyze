@@ -1,7 +1,7 @@
-FROM python:3.11-bookworm
+FROM tensorflow/tensorflow:latest-py3
 
 ARG MODEL_PATH=model.keras
-ENV MODEL_PATH=$MODEL_PATH
+ENV MODEL_PATH='model.keras'
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
@@ -11,7 +11,7 @@ COPY ./preprocess ./preprocess
 COPY ./model ./model
 COPY ./app.py .
 
-COPY ${MODEL_PATH} .
+COPY ${MODEL_PATH} ./model.keras
 
 
 EXPOSE 8000

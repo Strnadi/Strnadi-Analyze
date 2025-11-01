@@ -3,6 +3,7 @@
 
 # BLOB, wav, ... data used for quick testing
 .tstdata
+*.keras
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -1,0 +1,28 @@
+
+
+services:
+  birdnetsegment:
+    build:
+      context: ./birdnet-segment
+      # dockerfile: Dockerfile
+
+    # ports:
+      # - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+
+    restart: unless-stopped
+
+  classification:
+    build:
+      context: ./cnn-classification
+      args:
+        - MODEL_PATH="model.keras"
+    
+    environment:
+      - BIRDNET_URL="http://birdnetsegment:8000"
+
+    depends_on:
+      - birdnetsegment
+
+    restart: unless-stopped
