@@ -82,7 +82,7 @@ def load_and_normalize_audio(file_path, target_sr=SAMPLE_RATE):
 # audio, _ = load_and_normalize_audio("/home/hroudis/Downloads/pretty1.wav")
 # audio, _ = load_and_normalize_audio("/home/hroudis/Downloads/13.715_53.265_2020-07-11_2623_birdnet_mobile_3629931088_recording_77_00.wav")
 
-def load_model(path):
+def load_model(path) -> keras.Model:
     model = keras.saving.load_model(
         path,
         custom_objects={'Custom>MelToMagma': MelToMagma}
