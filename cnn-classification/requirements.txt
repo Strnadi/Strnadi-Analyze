@@ -1,0 +1,10 @@
+scipy
+numpy
+pandas
+librosa
+scikit-learn
+matplotlib
+pydot
+noisereduce
+ffmpeg-python
+tensorflow[and-cuda]
