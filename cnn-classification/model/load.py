@@ -7,6 +7,7 @@ import librosa
 SAMPLE_RATE = 48000
 SAMPLE_SECONDS = 4
 
+'''
 class MelToMagma(tf.keras.layers.Layer):
     """
     Converts a Mel-spectrogram to an RGB image (magma) and flattens it.
@@ -61,6 +62,7 @@ class MelToMagma(tf.keras.layers.Layer):
             )
         )
         return cfg
+'''
 
 def load_and_normalize_audio(file_path, target_sr=SAMPLE_RATE):
     try:
@@ -78,6 +80,24 @@ def load_and_normalize_audio(file_path, target_sr=SAMPLE_RATE):
         print(f"Error loading {file_path}: {e}")
         return None, None
 
+NUM_COLORS = 256
+LUT = tf.constant(
+    plt.get_cmap("magma", NUM_COLORS)(np.arange(NUM_COLORS))[:, :3].astype("float32"),
+    dtype=tf.float32
+)
+
+def mel_to_magma(t):
+    # t: (B,T,F) or (B,T,F,1)  →  (B,T,F,3)
+    if t.shape.rank == 4 and t.shape[-1] == 1:
+        t = tf.squeeze(t, -1) # (B,T,F)
+
+    t_min = tf.reduce_min(t, axis=[1, 2], keepdims=True)
+    t_max = tf.reduce_max(t, axis=[1, 2], keepdims=True)
+    t_norm = (t - t_min) / (t_max - t_min + 1e-6)  # [0,1]
+
+    idx = tf.cast(tf.round(t_norm * (NUM_COLORS - 1)), tf.int32)
+    return tf.gather(LUT, idx)  # (B,T,F,3)
+
 
 # audio, _ = load_and_normalize_audio("/home/hroudis/Downloads/pretty1.wav")
 # audio, _ = load_and_normalize_audio("/home/hroudis/Downloads/13.715_53.265_2020-07-11_2623_birdnet_mobile_3629931088_recording_77_00.wav")
@@ -85,7 +105,9 @@ def load_and_normalize_audio(file_path, target_sr=SAMPLE_RATE):
 def load_model(path) -> keras.Model:
     model = keras.saving.load_model(
         path,
-        custom_objects={'Custom>MelToMagma': MelToMagma}
+        custom_objects={
+            'mel_to_magma': mel_to_magma
+        }
     )
     return model
 

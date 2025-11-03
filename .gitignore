@@ -1,5 +1,6 @@
 # IDE
 .vscode
+.devcontainer
 
 # BLOB, wav, ... data used for quick testing
 .tstdata

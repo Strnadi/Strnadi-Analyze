@@ -1,8 +1,8 @@
 import requests
 import os
+from typing import *
 
-
-def get_yellowhammer_intervals(wav_bytes :bytes) -> list[tuple[float, float]]:
+def get_yellowhammer_intervals(wav_bytes :bytes) -> List[Tuple[float, float]]:
     
 
     url = os.environ.get("BIRDNET_URL", "http://localhost:8000/process")

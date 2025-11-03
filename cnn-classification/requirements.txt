@@ -7,6 +7,8 @@ matplotlib
 pydot
 noisereduce
 ffmpeg-python
+keras>=3.0.0
 tensorflow
 fastapi
 uvicorn
+python-multipart
