@@ -35,9 +35,14 @@ services:
       - "8000:8000"
 
     restart: unless-stopped
-
-    # networks:
-    #   - classifier
+    
+    networks:
+      - strnadi-ai
+  
+networks:
+  - strnadi-ai
+    - name: strnadi-ai
+    - external: true
 
 # networks:
 #   classifier:
