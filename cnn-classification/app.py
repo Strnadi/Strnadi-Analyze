@@ -1,9 +1,9 @@
 from fastapi import FastAPI, UploadFile
 from fastapi.responses import JSONResponse
-from pathlib import Path
-import tempfile, wave, shutil
-import io, zipfile, os
+import os, time
 import numpy as np
+import logging
+
 
 from preprocess.preprocess import preprocess
 from model.load import load_model
@@ -16,18 +16,29 @@ MIN_REPRESENTANT_CONFIDENCE_PERCENT = float(os.environ.get("MIN_REPRESENTANT_CON
 
 UNKNOWN = "Unknown"
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,  # or DEBUG for more detail
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+logger = logging.getLogger("app")
 app = FastAPI()
 
+logger.info("loading model")
 model = load_model(os.environ.get("MODEL_PATH"))
+logger.info("model loaded")
 
 
 @app.post("/classify")
 async def process(file: UploadFile):
+    logger.info("got file to process")
 
     segments = preprocess(file.file.read())
 
 
     if len(segments) == 0: # no segments => do early return
+            logger.info("no yellowhammers were found in recording")
             return JSONResponse(content={
                 "representant": "None",
                 "confidence": 100,
@@ -39,7 +50,13 @@ async def process(file: UploadFile):
         list(map(lambda x: x[1], segments))
     ).astype(np.float32)
 
+    logger.info(f"predicting dialects for {len(segments)} segments")
+    s_t = time.time()
+
     predictions = model.predict(x)
+
+    d_t = time.time() - s_t
+    logger.info(f"dialect prediction took {d_t} seconds")
     
 
     prediction_sum = np.zeros(len(LABELS), np.float32)
@@ -76,7 +93,7 @@ async def process(file: UploadFile):
 
         most_probable_representant = max(representant_pred_percent, key=lambda x: x[1])
         if most_probable_representant[1] < MIN_REPRESENTANT_CONFIDENCE_PERCENT:
-            most_probable_representant = (UNKNOWN, None)
+            most_probable_representant = (UNKNOWN, 0)
 
 
     return JSONResponse(content={
