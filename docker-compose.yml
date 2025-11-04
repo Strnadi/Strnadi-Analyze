@@ -40,9 +40,9 @@ services:
       - strnadi-ai
   
 networks:
-  - strnadi-ai
-    - name: strnadi-ai
-    - external: true
+  strnadi-ai:
+    external: true
+    name: strnadi-ai
 
 # networks:
 #   classifier:
