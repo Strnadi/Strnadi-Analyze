@@ -5,7 +5,7 @@ import tempfile, wave, shutil
 import io, zipfile, os
 import numpy as np
 
-from preprocess.preprocess import preprocess_file
+from preprocess.preprocess import preprocess
 from model.load import load_model
 
 LABELS = ['3S', 'BBe', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', 'XlB', 'XsB']
@@ -14,6 +14,8 @@ LABELS = ['3S', 'BBe', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', '
 MIN_CONFIDENCE_PERCENT = float(os.environ.get("MIN_CONFIDENCE_PERCENT", 70))
 MIN_REPRESENTANT_CONFIDENCE_PERCENT = float(os.environ.get("MIN_REPRESENTANT_CONFIDENCE_PERCENT", 70))
 
+UNKNOWN = "Unknown"
+
 app = FastAPI()
 
 model = load_model(os.environ.get("MODEL_PATH"))
@@ -21,13 +23,8 @@ model = load_model(os.environ.get("MODEL_PATH"))
 
 @app.post("/classify")
 async def process(file: UploadFile):
-    # TODO: use in-memory file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = Path(tmp.name)
 
-
-    segments = preprocess_file(tmp_path)
+    segments = preprocess(file.file.read())
 
 
     if len(segments) == 0: # no segments => do early return
@@ -61,7 +58,7 @@ async def process(file: UploadFile):
         segments_response.append(
             {
                 "interval": interval,
-                "label": most_probable_pred[0] if most_probable_pred[1] >= MIN_CONFIDENCE_PERCENT else None,
+                "label": most_probable_pred[0] if most_probable_pred[1] >= MIN_CONFIDENCE_PERCENT else UNKNOWN,
                 "full_prediction": dict(pred_percents)
             }
         )
@@ -79,7 +76,7 @@ async def process(file: UploadFile):
 
         most_probable_representant = max(representant_pred_percent, key=lambda x: x[1])
         if most_probable_representant[1] < MIN_REPRESENTANT_CONFIDENCE_PERCENT:
-            most_probable_representant = (None, None)
+            most_probable_representant = (UNKNOWN, None)
 
 
     return JSONResponse(content={

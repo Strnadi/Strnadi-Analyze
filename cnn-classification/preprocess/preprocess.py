@@ -24,7 +24,7 @@ def preprocess(wav_bytes :bytes) -> List[Tuple[Tuple[float, float], np.ndarray[n
         samples.append(
             # we're trimming to end + treshold to hopefuly make sure dialect portion is whole
             (
-                (start_sec, end_sec),
+                (start_sec, end),
                 wav_helper.trim_audio_to_np_float(wav_bytes, start_sec, end, SAMPLE_LEN)
             )
         )
