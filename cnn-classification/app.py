@@ -76,7 +76,7 @@ async def process(file: UploadFile):
 
         most_probable_representant = max(representant_pred_percent, key=lambda x: x[1])
         if most_probable_representant[1] < MIN_REPRESENTANT_CONFIDENCE_PERCENT:
-            most_probable_representant = (UNKNOWN, None)
+            most_probable_representant = (UNKNOWN, 0)
 
 
     return JSONResponse(content={
