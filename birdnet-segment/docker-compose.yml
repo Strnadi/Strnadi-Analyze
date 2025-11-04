@@ -1,0 +1,15 @@
+
+services:
+  birdnetsegment:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # image: birdnetsegment:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+

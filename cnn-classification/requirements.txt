@@ -1,0 +1,14 @@
+scipy
+numpy
+pandas
+librosa
+scikit-learn
+matplotlib
+pydot
+noisereduce
+ffmpeg-python
+keras>=3.0.0
+tensorflow
+fastapi
+uvicorn
+python-multipart

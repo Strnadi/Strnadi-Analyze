@@ -1,0 +1,44 @@
+
+# Sadly we need 2 conteiners for isolation because birdnet depends on keras 2 and classifier requires keras>=3.0.0 
+
+services:
+  birdnetsegment:
+    build:
+      context: ./birdnet-segment
+      # dockerfile: Dockerfile
+
+    # ports:
+      # - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BIRDNET_MIN_CONFIDENCE_TRESH=0.4
+
+    restart: unless-stopped
+
+    # networks:
+    #   - classifier
+
+  classification:
+    build:
+      context: ./cnn-classification
+      args:
+        - HOST_MODEL_PATH=model.keras
+    
+    environment:
+      - BIRDNET_URL=http://birdnetsegment:8000/process
+      - MIN_CONFIDENCE_PERCENT=70
+
+    depends_on:
+      - birdnetsegment
+
+    ports:
+      - "8000:8000"
+
+    restart: unless-stopped
+
+    # networks:
+    #   - classifier
+
+# networks:
+#   classifier:
+#     driver: bridge
