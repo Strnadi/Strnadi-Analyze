@@ -15,8 +15,8 @@ services:
 
     restart: unless-stopped
 
-    # networks:
-    #   - classifier
+    networks:
+      - classifier-net
 
   classification:
     build:
@@ -39,12 +39,12 @@ services:
     
     networks:
       - strnadi-ai
+      - classifier-net
   
 networks:
   strnadi-ai:
     external: true
     name: strnadi-ai
 
-# networks:
-#   classifier:
-#     driver: bridge
+  classifier-net:
+    driver: bridge
