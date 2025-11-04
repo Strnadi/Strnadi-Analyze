@@ -11,6 +11,7 @@ from model.load import load_model
 LABELS = ['3S', 'BBe', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', 'XlB', 'XsB']
 # LABELS = ['3S', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'XlB', 'XsB']
 
+MIN_CONFIDENCE_PERCENT = float(os.environ.get("MIN_CONFIDENCE_PERCENT", 70))
 
 app = FastAPI()
 
@@ -38,11 +39,12 @@ async def process(file: UploadFile):
         prediction = predictions[i]
         interval, _ = segments[i]
         pred_percents = list(zip(LABELS, map(lambda x: round(float(x), 2) * 100, prediction.flatten())))
+        most_probable_pred = max(pred_percents, key=lambda x: x[1])
 
         predictions_response.append(
             {
                 "interval": interval,
-                "label": max(pred_percents, key=lambda x: x[1])[0],
+                "label": most_probable_pred[0] if most_probable_pred[1] >= MIN_CONFIDENCE_PERCENT else None,
                 "full_prediction": dict(pred_percents)
             }
         )

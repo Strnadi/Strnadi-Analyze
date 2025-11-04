@@ -2,8 +2,8 @@
 FROM python:3.11-bookworm
 
 
-ARG MODEL_PATH=model.keras
-ENV MODEL_PATH='model.keras'
+ARG HOST_MODEL_PATH=model.keras
+ENV MODEL_PATH=./model.keras
 
 
 COPY requirements.txt .
@@ -16,7 +16,7 @@ COPY ./preprocess ./preprocess
 COPY ./model ./model
 COPY ./app.py .
 
-COPY ${MODEL_PATH} ./model.keras
+COPY ${HOST_MODEL_PATH} ./model.keras
 
 
 EXPOSE 8000
