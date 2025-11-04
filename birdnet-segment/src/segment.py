@@ -1,9 +1,10 @@
 from pathlib import Path
 from collections import OrderedDict
 from birdnet import SpeciesPredictions, predict_species_within_audio_file
+import os
 
 YELLOWHAMMER_ID = 'Emberiza citrinella_Yellowhammer'
-MIN_CONFIDENCE_TRESHOLD = 0.4
+MIN_CONFIDENCE_TRESHOLD = float(os.environ.get("BIRDNET_MIN_CONFIDENCE_TRESH", 0.4))
 OVERLAP_TRESH = 2.5
 
 
