@@ -4,7 +4,9 @@ from . import spectrogram
 
 from typing import *
 import numpy as np
+import logging
 
+logger = logging.getLogger("preprocess")
 
 def preprocess(wav_bytes :bytes) -> List[Tuple[Tuple[float, float], np.ndarray[np.floating]]]:
     WAV_END_ADD = 1
@@ -15,10 +17,10 @@ def preprocess(wav_bytes :bytes) -> List[Tuple[Tuple[float, float], np.ndarray[n
     wav_len = wav_helper.wav_length_from_bytes(wav_bytes)
 
     intervals = birdnet_preprocess_interface.get_yellowhammer_intervals(wav_bytes)
-    print(intervals)
 
     samples:List[Tuple[Tuple[float, float], np.ndarray[np.floating]]] = []
 
+    logger.debug(f"trimming intervals: {intervals}")
     for start_sec, end_sec in intervals:
         end = wav_len if(end_sec + 1 > wav_len) else end_sec + 1
         samples.append(
@@ -28,6 +30,7 @@ def preprocess(wav_bytes :bytes) -> List[Tuple[Tuple[float, float], np.ndarray[n
                 wav_helper.trim_audio_to_np_float(wav_bytes, start_sec, end, SAMPLE_LEN)
             )
         )
+    logger.debug("trimming done")
 
     return samples
 
@@ -53,12 +56,12 @@ def make_spects(samples) -> List[np.ndarray]:
     return spects
 
 
-if __name__ == '__main__':
-    samples = preprocess('.tstdata/F003716.wav')
-    spects = make_spects(samples)
-    for s in spects:
+# if __name__ == '__main__':
+#     samples = preprocess('.tstdata/F003716.wav')
+#     spects = make_spects(samples)
+#     for s in spects:
         
-        print(s.shape)
-        spectrogram.plot_mel_spect(
-            s
-        )
+#         print(s.shape)
+#         spectrogram.plot_mel_spect(
+#             s
+#         )

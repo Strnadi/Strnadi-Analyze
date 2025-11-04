@@ -1,14 +1,17 @@
 from pathlib import Path
-from collections import OrderedDict
 import birdnet
-import os
+import os, time
+import logging
 
 YELLOWHAMMER_ID = 'Emberiza citrinella_Yellowhammer'
 MIN_CONFIDENCE_TRESHOLD = float(os.environ.get("BIRDNET_MIN_CONFIDENCE_TRESH", 0.4))
 OVERLAP_TRESH = 2.5
 
+logger = logging.getLogger("segment")
 
+logger.info("initializing birdnet model")
 model = birdnet.load("acoustic", "2.4", "tf")
+logger.info("birdnet model initialized")
 
 def merge_overlaps(detections: list[tuple[float, float, float]]):
     """
@@ -44,6 +47,8 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
     # predict species within the whole audio file
     audio_path = Path(path)
 
+    logger.info("starting birdnet prediction")
+    s_t = time.time()
     # OrderedDict[Tuple[float, float], OrderedDict[str, float]]
     predictions_obj = model.predict(
         audio_path,
@@ -52,6 +57,9 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
         custom_species_list={yellowhammer_id},
         # species_filter={yellowhammer_id}
     )
+
+    d_t = time.time() - s_t
+    logger.info(f"birdnet prediction took {d_t} seconds")
 
     predictions = predictions_obj.to_structured_array()
 
@@ -64,6 +72,7 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
             (float(start), float(end), float(confidence))
         )
 
+    logger.debug("merging overlaps")
     merged_yellowhammers = merge_overlaps(yellowhammers)
 
 
