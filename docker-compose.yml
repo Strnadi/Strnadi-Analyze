@@ -22,7 +22,7 @@ services:
     build:
       context: ./cnn-classification
       args:
-        - HOST_MODEL_PATH="model.keras"
+        - HOST_MODEL_PATH=model.keras
     
     environment:
       - BIRDNET_URL=http://birdnetsegment:8000/process

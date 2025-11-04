@@ -28,6 +28,8 @@ async def process(file: UploadFile):
 
     segments = preprocess_file(tmp_path)
 
+    if len(segments) == 0: return JSONResponse(content=[])
+
     x = np.stack(
         list(map(lambda x: x[1], segments))
     ).astype(np.float32)
