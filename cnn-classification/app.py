@@ -12,6 +12,7 @@ LABELS = ['3S', 'BBe', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', '
 # LABELS = ['3S', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'XlB', 'XsB']
 
 MIN_CONFIDENCE_PERCENT = float(os.environ.get("MIN_CONFIDENCE_PERCENT", 70))
+MIN_REPRESENTANT_CONFIDENCE_PERCENT = float(os.environ.get("MIN_REPRESENTANT_CONFIDENCE_PERCENT", 70))
 
 app = FastAPI()
 
@@ -28,22 +29,36 @@ async def process(file: UploadFile):
 
     segments = preprocess_file(tmp_path)
 
-    if len(segments) == 0: return JSONResponse(content=[])
+
+    if len(segments) == 0: # no segments => do early return
+            return JSONResponse(content={
+                "representant": "None",
+                "confidence": 100,
+                "segments": []
+            }
+        )
 
     x = np.stack(
         list(map(lambda x: x[1], segments))
     ).astype(np.float32)
 
     predictions = model.predict(x)
+    
 
-    predictions_response = []
+    prediction_sum = np.zeros(len(LABELS), np.float32)
+
+    # ==== per segment prediction =====
+    segments_response = []
     for i in range(len(segments)):
         prediction = predictions[i]
         interval, _ = segments[i]
         pred_percents = list(zip(LABELS, map(lambda x: round(float(x), 2) * 100, prediction.flatten())))
         most_probable_pred = max(pred_percents, key=lambda x: x[1])
 
-        predictions_response.append(
+        if most_probable_pred[0] == 'None':
+            continue # if segment has None yellowhammers, there's no point in returning it
+
+        segments_response.append(
             {
                 "interval": interval,
                 "label": most_probable_pred[0] if most_probable_pred[1] >= MIN_CONFIDENCE_PERCENT else None,
@@ -51,7 +66,28 @@ async def process(file: UploadFile):
             }
         )
 
-    return JSONResponse(content=predictions_response)
+        prediction_sum += prediction
+    
+
+    most_probable_representant = ("None", 100)
+
+    # if all segments are None, this if will get skipped (default to "None")
+    if len(segments_response) != 0:
+        # ==== compute overall prediction summary ====
+        prediction_avg = prediction_sum / len(segments_response)
+        representant_pred_percent = list(zip(LABELS, map(lambda x: round(float(x), 2) * 100, prediction_avg)))
+
+        most_probable_representant = max(representant_pred_percent, key=lambda x: x[1])
+        if most_probable_representant[1] < MIN_REPRESENTANT_CONFIDENCE_PERCENT:
+            most_probable_representant = (None, None)
+
+
+    return JSONResponse(content={
+            "representant": most_probable_representant[0],
+            "confidence": most_probable_representant[1],
+            "segments": segments_response
+        }
+    )
     
 
 
