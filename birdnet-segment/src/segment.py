@@ -1,12 +1,14 @@
 from pathlib import Path
 from collections import OrderedDict
-from birdnet import SpeciesPredictions, predict_species_within_audio_file
+import birdnet
 import os
 
 YELLOWHAMMER_ID = 'Emberiza citrinella_Yellowhammer'
 MIN_CONFIDENCE_TRESHOLD = float(os.environ.get("BIRDNET_MIN_CONFIDENCE_TRESH", 0.4))
 OVERLAP_TRESH = 2.5
 
+
+model = birdnet.load("acoustic", "2.4", "tf")
 
 def merge_overlaps(detections: list[tuple[float, float, float]]):
     """
@@ -38,29 +40,28 @@ def merge_overlaps(detections: list[tuple[float, float, float]]):
 
 
 def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, yellowhammer_id=YELLOWHAMMER_ID) -> list[tuple[float, float, float]]  :
+    global model
     # predict species within the whole audio file
     audio_path = Path(path)
 
     # OrderedDict[Tuple[float, float], OrderedDict[str, float]]
-    predictions = SpeciesPredictions(predict_species_within_audio_file( audio_path, 
-        min_confidence=MIN_CONFIDENCE_TRESHOLD,
-        chunk_overlap_s=OVERLAP_TRESH,
+    predictions_obj = model.predict(
+        audio_path,
+        default_confidence_threshold=MIN_CONFIDENCE_TRESHOLD,
         batch_size=16,
-        species_filter={yellowhammer_id}
-    ))
+        custom_species_list={yellowhammer_id},
+        # species_filter={yellowhammer_id}
+    )
 
-    # print(predictions)
+    predictions = predictions_obj.to_structured_array()
 
     # (start, end, confidence)
     yellowhammers :list[tuple[float, float, float]] = []
 
-    for start_end in predictions:
-        detected = predictions[start_end]
-        if(yellowhammer_id not in detected): continue
-        confidence = detected[yellowhammer_id]
+    for _, start, end, species, confidence in predictions:
 
         yellowhammers.append(
-            (*start_end, confidence)
+            (float(start), float(end), float(confidence))
         )
 
     merged_yellowhammers = merge_overlaps(yellowhammers)

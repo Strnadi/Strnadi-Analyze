@@ -27,6 +27,7 @@ services:
     environment:
       - BIRDNET_URL=http://birdnetsegment:8000/process
       - MIN_CONFIDENCE_PERCENT=70
+      - MIN_REPRESENTANT_CONFIDENCE_PERCENT=65
 
     depends_on:
       - birdnetsegment
