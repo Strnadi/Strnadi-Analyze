@@ -40,8 +40,7 @@ async def process(file: UploadFile):
     if len(segments) == 0: # no segments => do early return
             logger.info("no yellowhammers were found in recording")
             return JSONResponse(content={
-                "representant": "None",
-                "confidence": 100,
+                "representantId": -1,
                 "segments": []
             }
         )
@@ -59,9 +58,11 @@ async def process(file: UploadFile):
     logger.info(f"dialect prediction took {d_t} seconds")
     
 
-    prediction_sum = np.zeros(len(LABELS), np.float32)
+    
 
     # ==== per segment prediction =====
+    all_max_predictions = []
+
     segments_response = []
     for i in range(len(segments)):
         prediction = predictions[i]
@@ -76,29 +77,16 @@ async def process(file: UploadFile):
             {
                 "interval": interval,
                 "label": most_probable_pred[0] if most_probable_pred[1] >= MIN_CONFIDENCE_PERCENT else UNKNOWN,
-                "full_prediction": dict(pred_percents)
+                "fullPredictions": dict(pred_percents)
             }
         )
+        all_max_predictions.append(most_probable_pred[1])
 
-        prediction_sum += prediction
     
-
-    most_probable_representant = ("None", 100)
-
-    # if all segments are None, this if will get skipped (default to "None")
-    if len(segments_response) != 0:
-        # ==== compute overall prediction summary ====
-        prediction_avg = prediction_sum / len(segments_response)
-        representant_pred_percent = list(zip(LABELS, map(lambda x: round(float(x), 2) * 100, prediction_avg)))
-
-        most_probable_representant = max(representant_pred_percent, key=lambda x: x[1])
-        if most_probable_representant[1] < MIN_REPRESENTANT_CONFIDENCE_PERCENT:
-            most_probable_representant = (UNKNOWN, 0)
-
+    representant_id = -1 if len(all_max_predictions) == 0 else all_max_predictions.index(max(all_max_predictions))
 
     return JSONResponse(content={
-            "representant": most_probable_representant[0],
-            "confidence": most_probable_representant[1],
+            "representantId": representant_id,
             "segments": segments_response
         }
     )
