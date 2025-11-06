@@ -2,6 +2,7 @@ from pathlib import Path
 import birdnet
 import os, time
 import logging
+from multiprocessing import cpu_count
 
 YELLOWHAMMER_ID = 'Emberiza citrinella_Yellowhammer'
 MIN_CONFIDENCE_TRESHOLD = float(os.environ.get("BIRDNET_MIN_CONFIDENCE_TRESH", 0.4))
@@ -9,6 +10,9 @@ OVERLAP_TRESH = 2.5
 # OVERLAP_TRESH = 1
 
 logger = logging.getLogger("segment")
+
+workers = cpu_count() - 1
+if(workers <= 0): workers = 1
 
 logger.info("initializing birdnet model")
 model = birdnet.load("acoustic", "2.4", "tf")
@@ -97,7 +101,7 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
         batch_size=1,
         custom_species_list={yellowhammer_id},
         overlap_duration_s=OVERLAP_TRESH,
-        n_workers=8
+        n_workers= workers
         # species_filter={yellowhammer_id}
     )
 
