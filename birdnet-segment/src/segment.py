@@ -6,6 +6,7 @@ import logging
 YELLOWHAMMER_ID = 'Emberiza citrinella_Yellowhammer'
 MIN_CONFIDENCE_TRESHOLD = float(os.environ.get("BIRDNET_MIN_CONFIDENCE_TRESH", 0.4))
 OVERLAP_TRESH = 2.5
+# OVERLAP_TRESH = 1
 
 logger = logging.getLogger("segment")
 
@@ -13,6 +14,40 @@ logger.info("initializing birdnet model")
 model = birdnet.load("acoustic", "2.4", "tf")
 logger.info("birdnet model initialized")
 
+
+FALL_TRESHOLD = 0.8
+
+# '''
+def merge_overlaps(detections: list[tuple[float, float, float]]):
+    """
+    Merge overlapping detections (start, end, confidence).
+    Keeps the most confident one if they overlap above threshold.
+    """
+    detections.sort(key=lambda x: x[0])
+    merged = []
+
+    # ceiling = 
+
+    for det in detections:
+        if not merged:
+            merged.append(det)
+            continue
+
+        last = merged[-1]
+
+        if(last[1] + 1 > det[0]):
+            # Merge them — keep the one with higher confidence
+            if det[2] > last[2]:
+                merged[-1] = det
+            else:
+                if abs(det[2] - last[2]) >= FALL_TRESHOLD:
+                    merged.append(det)
+        else:
+            merged.append(det)
+
+    return merged
+# '''
+'''
 def merge_overlaps(detections: list[tuple[float, float, float]]):
     """
     Merge overlapping detections (start, end, confidence).
@@ -28,18 +63,24 @@ def merge_overlaps(detections: list[tuple[float, float, float]]):
 
         last = merged[-1]
 
-        if(last[1] > det[0]):
-            # Merge them — keep the one with higher confidence
-            if det[2] > last[2]:
-                merged[-1] = det
-            else:
-                pass
-                # merged.append(det)
+        if(last[1] + 1 > det[0]):
+            merged[-1] = [
+                min(last[0], det[0]),
+                max(last[1], det[1]),
+                (last[2] + det[2]) / 2
+            ]
         else:
+            mid = merged[-1][0] + (abs(merged[-1][0] - merged[-1][1]) / 2)
+            merged[-1] = (mid - 1, mid + 2, merged[-1][2])
+
             merged.append(det)
 
-    return merged
+    if abs(merged[-1][0] - merged[-1][1]) != 4:
+        mid = merged[-1][0] + (abs(merged[-1][0] - merged[-1][1]) / 2)
+        merged[-1] = (mid - 1, mid + 2, merged[-1][2])
 
+    return merged
+'''
 
 
 def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, yellowhammer_id=YELLOWHAMMER_ID) -> list[tuple[float, float, float]]  :
@@ -53,8 +94,10 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
     predictions_obj = model.predict(
         audio_path,
         default_confidence_threshold=MIN_CONFIDENCE_TRESHOLD,
-        batch_size=16,
+        batch_size=1,
         custom_species_list={yellowhammer_id},
+        overlap_duration_s=OVERLAP_TRESH,
+        n_workers=8
         # species_filter={yellowhammer_id}
     )
 
@@ -72,6 +115,7 @@ def get_yellowhammers(path: str, min_confidence_tresh=MIN_CONFIDENCE_TRESHOLD, y
             (float(start), float(end), float(confidence))
         )
 
+    logger.debug(f"direct birdnet predictions: {yellowhammers}")
     logger.debug("merging overlaps")
     merged_yellowhammers = merge_overlaps(yellowhammers)
 

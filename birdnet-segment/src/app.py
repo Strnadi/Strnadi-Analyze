@@ -28,6 +28,7 @@ async def process(file: UploadFile):
     segments = get_yellowhammers(tmp_path)
     
     logger.info("file processed, responding")
+    logger.debug(f"segments: {segments}")
     return JSONResponse(content={"segments": segments})
 
 
