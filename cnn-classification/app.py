@@ -86,8 +86,15 @@ async def process(file: UploadFile):
         else:     
             all_max_predictions.append(most_probable_pred[1])
 
-    
-    representant_id = -1 if len(all_max_predictions) == 0 else all_max_predictions.index(max(all_max_predictions))
+
+    representant_id = -1
+
+    if len(all_max_predictions) != 0:
+        representant_id = all_max_predictions.index(max(all_max_predictions))
+
+        if segments_response[representant_id]["label"] in ("Unfinished", UNKNOWN):
+            representant_id = -1
+
 
     return JSONResponse(content={
             "representantId": representant_id,
