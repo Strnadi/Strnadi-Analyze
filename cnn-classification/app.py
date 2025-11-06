@@ -80,7 +80,11 @@ async def process(file: UploadFile):
                 "fullPredictions": dict(pred_percents)
             }
         )
-        all_max_predictions.append(most_probable_pred[1])
+
+        if most_probable_pred[0] == 'Unfinished':
+            all_max_predictions.append(0)
+        else:     
+            all_max_predictions.append(most_probable_pred[1])
 
     
     representant_id = -1 if len(all_max_predictions) == 0 else all_max_predictions.index(max(all_max_predictions))
