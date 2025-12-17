@@ -8,13 +8,37 @@ import logging
 from preprocess.preprocess import preprocess
 from model.load import load_model
 
-LABELS = ['3S', 'BBe', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', 'XlB', 'XsB']
+# should match model output
+MODEL_LABELS = ['3S', 'BBe', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', 'XlB', 'XsB']
+# dialects that should get returned by the api
+REAL_LABELS = ['BBe', 'BC', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', 'XB']
+
+UNKNOWN = "Unknown"
+
+
+#* temporary solution until we make new model that outputs correct number of dialects
+def remap_dialects(pred_percents : list[tuple[str, float]]) -> list[tuple[str, float]]:
+
+    remapped : dict[str, float] = dict()
+    predictions : dict[str, float] = dict(pred_percents)
+    
+    # these stay same
+    for k in {'BBe', 'BC', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished'}:
+        remapped[k] = predictions[k]
+
+    # merge XlB and XsB to XB
+    remapped["XB"] = predictions["XlB"] + predictions["XsB"]
+    #? BD => BlBh ?
+    remapped["BlBh"] = predictions["BD"]
+
+    return list(remapped.items())
+
+
 # LABELS = ['3S', 'BC', 'BD', 'BE', 'BhBl', 'BlBh', 'XlB', 'XsB']
 
 MIN_CONFIDENCE_PERCENT = float(os.environ.get("MIN_CONFIDENCE_PERCENT", 70))
 MIN_REPRESENTANT_CONFIDENCE_PERCENT = float(os.environ.get("MIN_REPRESENTANT_CONFIDENCE_PERCENT", 70))
 
-UNKNOWN = "Unknown"
 
 # Configure logging
 logging.basicConfig(
@@ -67,7 +91,10 @@ async def process(file: UploadFile):
     for i in range(len(segments)):
         prediction = predictions[i]
         interval, _ = segments[i]
-        pred_percents = list(zip(LABELS, map(lambda x: round(float(x), 2) * 100, prediction.flatten())))
+        pred_percents = list(zip(MODEL_LABELS, map(lambda x: round(float(x), 2) * 100, prediction.flatten())))
+        # temporary solution hopefully
+        pred_percents = remap_dialects(pred_percents)
+
         most_probable_pred = max(pred_percents, key=lambda x: x[1])
 
         if most_probable_pred[0] == 'None':
