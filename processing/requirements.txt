@@ -1,0 +1,7 @@
+tqdm
+numpy
+librosa
+requests
+ffmpeg-python
+keras
+tensorflow
