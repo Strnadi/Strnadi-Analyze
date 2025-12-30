@@ -16,7 +16,6 @@ Options:
     --dry-run        Print actions without invoking conversion
 """
 
-import shutil
 from pathlib import Path
 import argparse
 import re
@@ -30,8 +29,9 @@ import time
 import numpy as np
 import random
 import ffmpeg
-import tempfile
 import datetime
+import io
+from ai_edge_litert.interpreter import Interpreter
 
 import librosa
 
@@ -40,6 +40,14 @@ from scipy.io.wavfile import write
 from scipy.ndimage import shift
 
 EXTENSIONS = {".mp3", ".flac", ".ogg", ".wav"}
+SAMPLE_RATE = 48000
+
+
+def to_wav_bytes(audio: np.ndarray, sample_rate: int = 48000) -> bytes:
+    """Serialize mono int16 audio to WAV bytes."""
+    buf = io.BytesIO()
+    write(buf, sample_rate, audio)
+    return buf.getvalue()
 
 def load_and_normalize_audio(file_path, target_sr=48000):
     """
@@ -60,91 +68,240 @@ def load_and_normalize_audio(file_path, target_sr=48000):
         print(f"Error loading {file_path}: {e}")
         return None
 
-# def measure_rms(in_path: str, start: float, end: float) -> float:
-#     """Returns RMS level (dB) of an audio file using ffmpeg-python."""
-#     try:
-#         stream = (
-#             ffmpeg
-#             .input(in_path)
-#             .trim(start=start, end=end)
-#             .audio
-#             .filter('highpass', f=9000)
-#             .filter('volumedetect')
-#             .output('null', f='null')
-#         )
-#         _, err = ffmpeg.run(stream, capture_stdout=True, capture_stderr=True)
-#         match = re.search(r"mean_volume:\s*(-?\d+\.\d+)", err)
-#         if match:
-#             return float(match.group(1))
-#     except Exception:
-#         pass
-#     return -25.0
-
-def measure_rms(in_path: str, start: float, end: float) -> float:
-    """Returns RMS level (dB) of a wav file."""
+def measure_rms(wav_bytes: bytes, start: float, end: float) -> float:
+    """Returns RMS level (dB) for the provided WAV bytes."""
     cmd = [
-        "ffmpeg", "-hide_banner", "-ss", str(datetime.timedelta(seconds=start)), "-to", str(datetime.timedelta(seconds=end)), "-i", in_path,
+        "ffmpeg", "-hide_banner", "-ss", str(datetime.timedelta(seconds=round(start, 5))), "-to", str(datetime.timedelta(seconds=round(end, 5))), "-i", "pipe:0",
         "-af", f"highpass=f={3000},lowpass=f={9000},volumedetect",
         "-vn", "-f", "null", "-"
     ]
-    proc = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
-    match = re.search(r"mean_volume:\s*(-?\d+\.\d+)", proc.stderr)
+    proc = subprocess.run(cmd, input=wav_bytes, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+    match = re.search(r"mean_volume:\s*(-?\d+\.\d+)", proc.stderr.decode("utf-8", errors="ignore"))
     if match:
         return float(match.group(1))
 
-    print(f"Warning: could not measure RMS for {in_path}")
-    return -25.0  # fa
+    print("Warning: could not measure RMS for provided audio bytes")
+    return -25.0  # fallback level
 
-def ffmpeg_augment_recording(in_path: str, out_path: str, duration: float, total_duration: float, prefix_length: float, padding_length: float, fade_in: float = 0.3, fade_out: float = 0.06) -> None:
-    rms = measure_rms(in_path, prefix_length, prefix_length + duration)
-    volume_factor = (10 ** (rms / 50.0)) * 0.15
-    volume_factor = max(0.005, min(volume_factor, 0.05))
-    noise_fade_in = fade_in * 1.5
-    noise_fade_out = fade_out * 1.5
 
-    audio = (
+def time_stretch_to_duration(wav_bytes: bytes, current_duration: float, target_duration: float = 5.0) -> bytes:
+    """
+    Time-stretch audio to target duration without changing pitch.
+    Prefers ffmpeg rubberband (higher quality, wider tempo range); falls back to atempo if unavailable.
+    """
+    if current_duration <= 0 or target_duration <= 0:
+        return wav_bytes
+
+    tempo = current_duration / target_duration  # <1 slows down, >1 speeds up
+
+    # Build base stream
+    stream = (
         ffmpeg
-        .input(in_path)
+        .input('pipe:0')
         .audio
         .filter('aresample', 48000)
-        # .filter('pan', 'mono|c0=0.5*c0')
-        # .filter('afade', t='in', st=max(0.0, prefix_length - fade_in), d=fade_in)
-        # .filter('afade', t='out', st=max(0.0, prefix_length + duration - fade_out), d=fade_out)
     )
 
-    noise_prefix = (
-        ffmpeg
-        .input(f'aevalsrc=random(0):d={duration}:s=48000:channel_layout=mono', f='lavfi')
-        .filter('atrim', start=0, end=prefix_length)
-        .filter('volume', volume_factor)
-        # .filter('afade', t='in', st=0, d=noise_fade_in)
-        # .filter('afade', t='out', st=max(0.0, prefix_length - noise_fade_out), d=noise_fade_out)
-        # .filter('adelay', delays=f'{fade_in}|{fade_in}')
-    )
+    try:
+        # Rubberband handles large tempo changes and keeps formants more naturally
+        rb_stream = stream.filter('rubberband', tempo=f'{tempo:.6f}', formant='preserved')
+        out_stream = ffmpeg.output(rb_stream, 'pipe:1', ac=1, ar=48000, acodec='pcm_s16le', format='wav').overwrite_output()
+        out_bytes, stderr = ffmpeg.run(out_stream, input=wav_bytes, capture_stdout=True, capture_stderr=True)
+        return out_bytes
+    except ffmpeg.Error as e:
+        # Fallback to atempo chain if rubberband is not available
+        err_msg = e.stderr.decode('utf-8', errors='ignore') if e.stderr else str(e)
+        if 'No such filter: "rubberband"' not in err_msg:
+            print(f"Rubberband error: {err_msg}")
+        
+        remaining_tempo = tempo
+        fallback = stream
+        while remaining_tempo < 0.5:
+            fallback = fallback.filter('atempo', 0.5)
+            remaining_tempo /= 0.5
+        while remaining_tempo > 2.0:
+            fallback = fallback.filter('atempo', 2.0)
+            remaining_tempo /= 2.0
+        fallback = fallback.filter('atempo', f'{remaining_tempo:.6f}')
 
-    padding_delay_ms = int((prefix_length + duration) * 1000)
-    noise_padding = (
-        ffmpeg
-        .input(f'aevalsrc=random(0):d={padding_length}:s=48000:channel_layout=mono', f='lavfi')
-        .filter('atrim', start=0, end=padding_length)
-        .filter('volume', volume_factor)
-        # .filter('afade', t='in', st=0, d=noise_fade_in)
-        # .filter('afade', t='out', st=max(0.0, padding_length - noise_fade_out), d=noise_fade_out)
-        .filter('adelay', delays=f'{padding_delay_ms}|{padding_delay_ms}')
-    )
+        out_stream = ffmpeg.output(fallback, 'pipe:1', ac=1, ar=48000, acodec='pcm_s16le', format='wav').overwrite_output()
+        try:
+            out_bytes, stderr = ffmpeg.run(out_stream, input=wav_bytes, capture_stdout=True, capture_stderr=True)
+            return out_bytes
+        except ffmpeg.Error as e2:
+            print(f"Time stretch error (fallback): {e2.stderr.decode('utf-8', errors='ignore') if e2.stderr else str(e2)}")
+            return wav_bytes
 
-    mixed = ffmpeg.filter([audio, noise_prefix, noise_padding], 'amix', inputs=3, duration='first', dropout_transition=0)
-    out = ffmpeg.output(mixed, out_path, ac=1, ar=48000, acodec='pcm_s16le').overwrite_output()
-    ffmpeg.run(out, quiet=True)
+def pad_recording(wav_bytes: bytes, duration: float, total_duration: float, prefix_length: float, padding_length: float, fade_in: float = 0.5, fade_out: float = 0.5) -> bytes:
+    """
+    Blend audio with noise padding using crossfades for seamless spectrogram transitions.
+    
+    The input wav_bytes has silence at the start (prefix_length) and end (padding_length).
+    This function fills that silence with noise that crossfades smoothly with the audio.
+    """
+    try:
+        rms = measure_rms(wav_bytes, prefix_length, prefix_length + duration)
+        volume_factor = (10 ** (rms / 50.0)) * 0.15
+        volume_factor = max(0.005, min(volume_factor, 0.05))
+        
+        # Crossfade duration - where noise and audio overlap
+        crossfade = prefix_length
+        crossfade_out = padding_length
+
+        # Main audio with crossfade envelopes at boundaries
+        # Audio starts at prefix_length, so fade in there; fade out before padding starts
+        audio = (
+            ffmpeg
+            .input('pipe:0')
+            .audio
+            .filter('aresample', 48000)
+            .filter('afade', t='in', st=f"{max(0.0, prefix_length - crossfade):.5f}", d=f"{(crossfade * 2):.5f}", curve='qsin')
+            .filter('afade', t='out', st=f"{max(0.0, prefix_length + duration - crossfade_out):.5f}", d=f"{(crossfade_out * 2):.5f}", curve='qsin')
+        )
+
+        # Noise prefix: fills [0, prefix_length], fades out as audio fades in
+        noise_prefix = (
+            ffmpeg
+            .input(f'anoisesrc=d={prefix_length + crossfade:.5f}:c=pink:s=48000', f='lavfi')
+            .filter('volume', f"{volume_factor:.8f}")
+            .filter('afade', t='out', st=f"{max(0.0, prefix_length - crossfade):.5f}", d=f"{(crossfade * 2):.5f}", curve='qsin')
+        )
+
+        # Noise padding: fills [prefix_length + duration, end], fades in as audio fades out
+        padding_delay_ms = int((prefix_length + duration - crossfade_out) * 1000)
+        noise_padding = (
+            ffmpeg
+            .input(f'anoisesrc=d={padding_length + crossfade_out:.5f}:c=pink:s=48000', f='lavfi')
+            .filter('volume', f"{volume_factor:.8f}")
+            .filter('afade', t='in', st=0, d=f"{(crossfade_out * 2):.5f}", curve='qsin')
+            .filter('adelay', delays=f'{padding_delay_ms}|{padding_delay_ms}')
+        )
+
+        mixed = ffmpeg.filter([audio, noise_prefix, noise_padding], 'amix', inputs=3, duration='first', dropout_transition=0)
+        out_stream = ffmpeg.output(mixed, 'pipe:1', ac=1, ar=48000, acodec='pcm_s16le', format='wav').overwrite_output()
+        out_bytes, stderr = ffmpeg.run(out_stream, input=wav_bytes, capture_stdout=True, capture_stderr=False)
+        return out_bytes
+    except Exception as e:
+        print(f"Error during ffmpeg augmentation: {e}")
+        if 'stderr' in locals():
+            print("FFmpeg stderr:", stderr.decode("utf-8", errors="ignore"))
+        raise e
+
+def ffmpeg_augment_recording(wav_bytes: bytes, duration: float, total_duration: float, prefix_length: float, padding_length: float, fade_in: float = 0.5, fade_out: float = 0.5) -> bytes:
+    """
+    Blend audio with noise padding using crossfades for seamless spectrogram transitions.
+    
+    The input wav_bytes has silence at the start (prefix_length) and end (padding_length).
+    This function fills that silence with noise that crossfades smoothly with the audio.
+    """
+    return time_stretch_to_duration(wav_bytes, duration, total_duration)
+    # return pad_recording(wav_bytes, duration, total_duration, prefix_length, padding_length, fade_in, fade_out)
+
+def chunk_audio(audio, clip_length=3.0, step=0.5, target_sr=SAMPLE_RATE):
+    for i in range(0, len(audio), int(step * target_sr)):
+        chunk = audio[i:i + int(clip_length * target_sr)]
+
+        if len(chunk) < int(clip_length * target_sr):
+            padding = int(clip_length * target_sr) - len(chunk)
+            chunk = np.pad(chunk, (0, padding), 'constant')
+
+        start_s = i / target_sr
+        end_s = start_s + clip_length
+        yield chunk, start_s, end_s
 
 
-def get_yellowhammer_intervals(wav_bytes :bytes) -> List[Tuple[float, float]]:
-    url = os.environ.get("BIRDNET_URL", "http://localhost:32808/process")
-    response = requests.post(url, files={"file": ("audio.wav", wav_bytes, "audio/wav")})
-    response.raise_for_status()
+def process_audio(audio, batch_size=8, thread_count=8):
+    interpreter = Interpreter(model_path="audio-model.tflite", num_threads=thread_count)
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
 
-    json = response.json()
-    return json['segments']
+    interpreter.resize_tensor_input(input_details[0]['index'], [batch_size, 144000])
+    interpreter.allocate_tensors()
+
+    prediction = [] # [(start, end, label, confidence)]
+
+    # Collect chunks into batches
+    batch_chunks = []
+    batch_times = []
+
+    with open("labels/en_us.txt", "r") as f:
+        labels = [line.strip() for line in f.readlines()]
+
+    for chunk, start, end in chunk_audio(audio):
+        batch_chunks.append(chunk)
+        batch_times.append((start, end))
+
+        if len(batch_chunks) == batch_size:
+            # Process full batch
+            interpreter.set_tensor(input_details[0]['index'], np.array(batch_chunks))
+            interpreter.invoke()
+
+            output_data = interpreter.get_tensor(output_details[0]['index'])
+            for i, (start, end) in enumerate(batch_times):
+                predicted = zip(labels, output_data[i])
+
+                yellowhammer = list(filter(lambda x: x[0] == 'Emberiza citrinella_Yellowhammer', predicted))[0]
+
+                if yellowhammer[1] > 0.4:
+                    prediction.append((start, end, yellowhammer[1]))
+
+            batch_chunks = []
+            batch_times = []
+
+    # Process remaining chunks (partial batch)
+    if batch_chunks:
+        # Pad batch to full size with zeros
+        while len(batch_chunks) < batch_size:
+            batch_chunks.append(np.zeros(144000, dtype=np.float32))
+            batch_times.append(None)
+
+        interpreter.set_tensor(input_details[0]['index'], np.array(batch_chunks))
+        interpreter.invoke()
+
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        for i, times in enumerate(batch_times):
+            if times is None:
+                break
+            start, end = times
+            predicted = zip(labels, output_data[i])
+            yellowhammer = list(filter(lambda x: x[0] == 'Emberiza citrinella_Yellowhammer', predicted))[0]
+
+            if yellowhammer[1] > 0.4:
+                prediction.append((start, end, yellowhammer[1]))
+
+    return prediction
+
+def merge_overlaps_simple(detections: list[tuple[float, float, float]], FALL_THRESHOLD=0.8):
+    """
+    Merge overlapping detections (start, end, dialect, confidence).
+    Keeps the most confident one if they overlap above threshold.
+    """
+    detections.sort(key=lambda x: x[0])
+    merged = []
+
+    for det in detections:
+        if not merged:
+            merged.append(det)
+            continue
+
+        last = merged[-1]
+
+        if(last[1] + 1 > det[0]):
+            # Merge them — keep the one with higher confidence
+            if det[2] > last[2]:
+                merged[-1] = det
+            else:
+                if abs(det[2] - last[2]) >= FALL_THRESHOLD:
+                    merged.append(det)
+        else:
+            merged.append(det)
+
+    return merged
+
+def get_yellowhammer_intervals(audio: np.ndarray) -> list[tuple[float, float, float]]:
+    raw_segments = process_audio(audio, thread_count=8, batch_size=8)
+    merged_segments = merge_overlaps_simple(raw_segments)
+    return merged_segments
 
 
 def find_audio_files(root: Path):
@@ -205,7 +362,7 @@ def main():
         sys.exit(2)
 
     # Walk and process
-    for infile in tqdm(find_audio_files(in_dir), desc="Processing files"):
+    for infile in tqdm(sorted(find_audio_files(in_dir)), desc="Processing files", file=sys.stdout):
         try:
             relpath = infile.relative_to(in_dir)
         except Exception:
@@ -224,58 +381,44 @@ def main():
         if wav_len > 5.0:
             try:
                 with open(infile, 'rb') as f:
-                    intervals = get_yellowhammer_intervals(f.read())
+                    intervals = get_yellowhammer_intervals(audio)
 
             except Exception as e:
                 print(f"Error during segmentation of {infile}: {e}", file=sys.stderr)
                 continue
 
             i = 0
-            for start, end in intervals:
+            for start, end, confidence in intervals:
                 window_start, window_end = find_window((start, end), wav_len, padding=1.0)
 
                 start_5sec = window_start
                 end_5sec = window_end
 
                 trimmed = audio[int(start_5sec * 48000):int(end_5sec * 48000)].copy()
-
-                if abs(end_5sec - start_5sec) < 5.0:
-                    total_padding = 5.0 - (end_5sec - start_5sec)
-                    pad_start = random.uniform(0, total_padding)
-                    pad_start_samples = int(pad_start * 48000)
-
-                    trimmed.resize(trimmed.shape[0] + int(total_padding * 48000))
-                    trimmed = shift(trimmed, pad_start_samples, cval=0)
+                clip_duration = end_5sec - start_5sec
 
                 trimmed_int16 = np.int16(trimmed * 32767)
-                write(f"{outfile}.{i}.wav", 48000, trimmed_int16)
+                wav_bytes = to_wav_bytes(trimmed_int16, sample_rate=48000)
 
-                if abs(end_5sec - start_5sec) < 5.0:
-                    with tempfile.NamedTemporaryFile(suffix=".wav") as fp:
-                        ffmpeg_augment_recording(f"{outfile}.{i}.wav", fp.name, end_5sec - start_5sec, 5.0, pad_start, total_padding - pad_start)
-                        fp.flush()
+                # Time-stretch to exactly 5 seconds if needed
+                if abs(clip_duration - 5.0) > 0.01:
+                    wav_bytes = time_stretch_to_duration(wav_bytes, clip_duration, 5.0)
 
-                        shutil.move(fp.name, f"{outfile}.{i}.wav")
+                with open(f"{outfile}.{i}.wav", "wb") as fp:
+                    fp.write(wav_bytes)
 
                 i += 1
 
         elif wav_len < 5.0:
-            total_padding = 5.0 - wav_len
-            pad_start = random.uniform(0, total_padding)
-            pad_start_samples = int(pad_start * 48000)
-
-            trimmed = audio[int(0 * 48000):int(wav_len * 48000)].copy()
-            trimmed.resize(trimmed.shape[0] + int(total_padding * 48000))
-
-            trimmed = shift(trimmed, pad_start_samples, cval=0)
+            trimmed = audio.copy()
             trimmed_int16 = np.int16(trimmed * 32767)
-            write(f"{outfile}.wav", 48000, trimmed_int16)
+            wav_bytes = to_wav_bytes(trimmed_int16, sample_rate=48000)
 
-            with tempfile.NamedTemporaryFile(suffix=".wav") as fp:
-                ffmpeg_augment_recording(f"{outfile}.wav", fp.name, wav_len, 5, pad_start, total_padding-pad_start)
-                fp.flush()
+            # Time-stretch to exactly 5 seconds
+            wav_bytes = time_stretch_to_duration(wav_bytes, wav_len, 5.0)
 
-                shutil.move(fp.name, f"{outfile}.wav")
+            with open(f"{outfile}.wav", "wb") as fp:
+                fp.write(wav_bytes)
 
         else:
             trimmed = audio[int(0 * 48000):int(wav_len * 48000)].copy()

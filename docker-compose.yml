@@ -5,7 +5,7 @@ services:
       context: .
       args:
         - HOST_MODEL_PATH=model.keras
-    
+
     environment:
       - MIN_CONFIDENCE_PERCENT=70
       - MIN_REPRESENTANT_CONFIDENCE_PERCENT=65
