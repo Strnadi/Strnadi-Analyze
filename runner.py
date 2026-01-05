@@ -67,8 +67,10 @@ def process_audio(audio, batch_size=8, thread_count=8):
             for i, (start, end) in enumerate(batch_times):
                 predicted = zip(MODEL_LABELS, output_data[i])
                 best_label, best_confidence = max(predicted, key=lambda x: x[1])
-                if best_label != 'None' and best_confidence > 0.5:
-                    prediction.append((start, end, best_label, float(best_confidence)))
+                if best_label != 'None' and best_confidence > (MIN_CONFIDENCE_PERCENT / 100.0):
+                    prediction.append((start, end, best_label, float(best_confidence), dict(predicted)))
+                elif best_label != 'None':
+                    prediction.append((start, end, "Unknown", float(best_confidence), dict(predicted)))
 
             batch_chunks = []
             batch_times = []
@@ -90,12 +92,14 @@ def process_audio(audio, batch_size=8, thread_count=8):
             start, end = times
             predicted = zip(MODEL_LABELS, output_data[i])
             best_label, best_confidence = max(predicted, key=lambda x: x[1])
-            if best_label != 'None' and best_confidence > 0.5:
-                prediction.append((start, end, best_label, float(best_confidence)))
+            if best_label != 'None' and best_confidence > (MIN_CONFIDENCE_PERCENT / 100.0):
+                prediction.append((start, end, best_label, float(best_confidence), dict(predicted)))
+            elif best_label != 'None':
+                prediction.append((start, end, "Unknown", float(best_confidence), dict(predicted)))
 
     return prediction
 
-def merge_overlaps_simple(detections: list[tuple[float, float, str, float]], FALL_THRESHOLD=0.8):
+def merge_overlaps_simple(detections: list[tuple[float, float, str, float, dict]], FALL_THRESHOLD=0.8) -> list[tuple[float, float, str, float, dict]]:
     """
     Merge overlapping detections (start, end, dialect, confidence).
     Keeps the most confident one if they overlap above threshold.
@@ -109,12 +113,8 @@ def merge_overlaps_simple(detections: list[tuple[float, float, str, float]], FAL
             continue
 
         last = merged[-1]
-        same_label = last[2] == det[2]
-        unfinished_bridge = (last[2] == 'Unfinished' and det[2] != 'Unfinished') or (
-            det[2] == 'Unfinished' and last[2] != 'Unfinished'
-        )
 
-        if(last[1] + 1 > det[0]):# and (same_label or unfinished_bridge)):
+        if(last[1] + 1 > det[0]):
             # Merge them — keep the one with higher confidence
             if det[3] > last[3]:
                 merged[-1] = det
@@ -143,9 +143,9 @@ async def process(file: UploadFile):
         "segments": [
             {
                 "interval": [pred_start, pred_end],
-                "label": label if confidence >= MIN_CONFIDENCE_PERCENT else "Unknown",
-                "fullPredictions": None #dict(pred_percents)
+                "label": label,
+                "fullPredictions": pred_percents
             }
-            for pred_start, pred_end, label, confidence in merged_segments
+            for pred_start, pred_end, label, confidence, pred_percents in merged_segments
         ]
     })

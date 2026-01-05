@@ -3,6 +3,7 @@ import keras
 import numpy as np
 from pathlib import Path
 from tqdm.auto import tqdm  # progress bar
+import argparse
 
 def load_and_normalize_audio(file_path, target_sr=48000):
     """
@@ -35,8 +36,13 @@ spect = keras.layers.MelSpectrogram(
     power_to_db=True
 )
 
-input_dir = Path('strnadi-flat')
-output_dir = Path('strnadi-encoded')
+p = argparse.ArgumentParser(description="Convert WAV files to normalized Mel spectrograms")
+p.add_argument("in_dir", nargs="?", default='.', help="input folder (default=current directory)")
+p.add_argument("out_dir", nargs="?", default='converted', help="output folder (default=./converted)")
+args = p.parse_args()
+
+input_dir = Path(args.in_dir).resolve()
+output_dir = Path(args.out_dir).resolve()
 output_dir.mkdir(parents=True, exist_ok=True)
 
 wav_files = list(input_dir.glob('*.wav'))  # make a list so we can show total
@@ -59,7 +65,7 @@ for wav_file in tqdm(wav_files, desc="Processing WAV files", unit="file"):
         mel = np.squeeze(mel, axis=0)           # remove batch dimension
 
         # Standardize the spectrogram
-        mel = (mel - np.mean(mel)) / np.std(mel)
+        mel = (mel - np.mean(mel)) / (np.std(mel) + 1e-8)
     except Exception as e:
         print(f"Error computing spectrogram for {wav_file}: {e}")
         continue

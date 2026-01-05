@@ -401,7 +401,7 @@ def main():
                 wav_bytes = to_wav_bytes(trimmed_int16, sample_rate=48000)
 
                 # Time-stretch to exactly 5 seconds if needed
-                if abs(clip_duration - 5.0) > 0.01:
+                if abs(clip_duration - 5.0) > 0:
                     wav_bytes = time_stretch_to_duration(wav_bytes, clip_duration, 5.0)
 
                 with open(f"{outfile}.{i}.wav", "wb") as fp:
