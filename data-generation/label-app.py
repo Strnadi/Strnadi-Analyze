@@ -12,6 +12,7 @@ import librosa.display
 import matplotlib
 from flask import Flask, render_template_string, send_file, request, redirect, url_for, session, make_response, abort, g
 from threading import Lock
+from ai_edge_litert.interpreter import Interpreter
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -111,6 +112,43 @@ def choose_class(label, curr_label):
 
     return "btn-label"
 
+def load_and_normalize_audio(file_path):
+    try:
+        audio, sr = librosa.load(file_path, sr=48000, mono=False)
+        if audio.ndim > 1:
+            if audio.shape[0] > 1 and np.any(audio[1]):
+                audio = np.mean(audio, axis=0)
+            else:
+                audio = audio[0]
+
+        audio = librosa.util.normalize(audio)
+        audio = np.clip(audio, -1.0, 1.0)
+        return audio
+
+    except Exception as e:
+        print(f"Error loading {file_path}: {e}")
+        return None
+
+def tocsv(predictions: dict) -> str:
+    return ",".join(f"{k}={v:.2f}%" for k, v in predictions.items())
+
+def get_top_prediction(predictions: dict) -> tuple:
+    """Returns (label, probability) of the top prediction"""
+    if not predictions:
+        return (None, 0.0)
+    top_label = max(predictions, key=predictions.get)
+    return (top_label, predictions[top_label])
+
+def format_prob(prob: float) -> str:
+    """Format probability as percentage string"""
+    return f"{prob * 100:.2f}%"
+
+MODEL_LABELS = ["BC", "BE", "BhBl", "BlBh", "None", "Unfinished", "XB"]
+
+interpreter = Interpreter(model_path="good-model-1.tflite", num_threads=8)
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+interpreter.allocate_tensors()
 
 # ---------- routes ----------
 @app.route("/")
@@ -135,10 +173,23 @@ def index():
 
     filepath, original_label = row
 
+    audio = load_and_normalize_audio(filepath)
+    # print(audio, audio.shape)
+
+    interpreter.set_tensor(input_details[0]['index'], np.array([audio]))
+    interpreter.invoke()
+
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+    predictions = dict(zip(MODEL_LABELS, map(float, output_data[0])))
+
+    # print(predictions)
+
     sid = get_session_id()
     cur.execute("SELECT COUNT(*) FROM undo_stack WHERE session_id = ?", (sid,))
     undo_count = cur.fetchone()[0]
 
+    top_label, top_prob = get_top_prediction(predictions)
+    
     return render_template_string(
         TEMPLATE,
         filepath=filepath,
@@ -146,7 +197,12 @@ def index():
         choose_class=choose_class,
         labels=get_all_labels(),
         undo_available=(undo_count > 0),
-        undo_count=undo_count
+        undo_count=undo_count,
+        predictions=predictions,
+        tocsv=tocsv,
+        format_prob=format_prob,
+        top_prediction=top_label,
+        top_prob=top_prob
     )
 
 
@@ -172,32 +228,23 @@ def sound(filepath):
     if not os.path.exists(filepath):
         return "File not found", 404
 
-    audio, sr = librosa.load(filepath, sr=48000, mono=False)
-    if audio.ndim > 1:
-        if audio.shape[0] > 1 and np.any(audio[1]):
-            audio = np.mean(audio, axis=0)
-        else:
-            audio = audio[0]
-
-    audio = librosa.util.normalize(audio)
-    audio = np.clip(audio, -1.0, 1.0)
-
+    audio = load_and_normalize_audio(filepath)
     int16 = (audio * 32767.0).astype(np.int16)
 
     buf = io.BytesIO()
     with wave.open(buf, 'wb') as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
-        wf.setframerate(sr)
+        wf.setframerate(48000)  # Same sample rate as load_and_normalize_audio
         wf.writeframes(int16.tobytes())
 
     buf.seek(0)
     return send_file(buf, mimetype='audio/wav')
 
 
-@app.route("/model")
-def model():
-    return send_file("good-model-1.tflite", mimetype='application/octet-stream', conditional=True, last_modified=datetime.datetime.fromtimestamp(os.path.getmtime("good-model-1.tflite")))
+# @app.route("/model")
+# def model():
+#     return send_file("good-model-1.tflite", mimetype='application/octet-stream', conditional=True, last_modified=datetime.datetime.fromtimestamp(os.path.getmtime("good-model-1.tflite")))
 
 
 @app.route("/label", methods=["POST"])
@@ -481,6 +528,15 @@ TEMPLATE = """
                     <img class="media-img" src="{{ url_for('spectrogram', filepath=filepath) }}" width="600"><br>
                     <img class="media-img" src="{{ url_for('static', filename='dialekty.png') }}" alt="Logo" width="600"><br>
                 </div>
+                
+                <!-- Server-side prediction info -->
+                <div id="server_prediction" style="margin-top: 8px; padding: 8px; border-radius: 8px; display: {% if top_prediction %}block{% else %}none{% endif %};">
+                    <strong>Model prediction:</strong> {{ top_prediction }} ({{ format_prob(top_prob) if top_prediction else '' }})
+                </div>
+
+                <div id="server_prediction" style="margin-top: 8px; padding: 8px; border-radius: 8px; display: {% if top_prediction %}block{% else %}none{% endif %};">
+                    <strong>Original label:</strong> {{ current_label }}
+                </div>
                 <div class="swipe-hint mobile-only" aria-live="polite" id="swipe_status">Swipe right = model • Swipe up = original • Swipe left = all labels</div>
             
                 <!-- BUTTONS FORM -->
@@ -490,14 +546,14 @@ TEMPLATE = """
               type="submit"
               name="label"
               id="{{ label }}"
-              style="cursor: pointer;"
+              style="cursor: pointer;{% if label == top_prediction %} font-weight: bold;{% endif %}"
               class="{{ choose_class(label, current_label) }}"
               value="{{ label }}"
-            >{{ label }}</button>
+            >{{ label }}{% if label in predictions %} ({{ format_prob(predictions[label]) }}){% endif %}</button>
                   {% endfor %}
             
                   <input type="hidden" name="filepath" value="{{ filepath }}">
-                  <input type="hidden" id="model_labels_buttons" name="model_labels" value="">
+                  <input type="hidden" id="model_labels_buttons" name="model_labels" value="{{ tocsv(predictions) }}">
                 <input type="hidden" id="swipe_label_input" name="label" value="" disabled>
                 </form>
             
@@ -505,8 +561,8 @@ TEMPLATE = """
             <div class="custom-form desktop-only">
                 <form id="custom_form" action="/label" method="post" style="display:inline-block;">
             <input type="hidden" name="filepath" value="{{ filepath }}">
-            <input type="hidden" id="model_labels_custom" name="model_labels" value="">
-            <input type="text" id="custom_label_input" name="label" placeholder="Type custom label (e.g. MySpecies)">
+            <input type="hidden" id="model_labels_custom" name="model_labels" value="{{ tocsv(predictions) }}">
+            <input type="text" id="custom_label_input" name="label" placeholder="Custom dialect">
             <button type="submit" class="custom-submit" style="cursor: pointer;">Submit Custom</button>
                   </form>
                 </div>
@@ -540,12 +596,8 @@ TEMPLATE = """
             </div>
         </div>
 
-    <script type="module">
-      import { loadLiteRt, loadAndCompile, Tensor } from 'https://esm.sh/@litertjs/core@0.2.1';
-
-      let webGpu = !!navigator.gpu;
-
-      (async function() {
+    <script>
+      (function() {
 
                 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
                 const originalLabel = {{ current_label|tojson }};
@@ -556,8 +608,9 @@ TEMPLATE = """
                 const overlayClose = document.getElementById('overlay_close');
                 const overlayInfo = document.getElementById('overlay_info');
                 const tooltip = document.getElementById('swipe_tooltip');
-                let topPredLabel = null;
-                let modelResult = null;
+                // Server-side predictions
+                const topPredLabel = {{ top_prediction|tojson }};
+                const serverPredictions = {{ predictions|tojson }};
 
                 function setStatus(msg) {
                     if (swipeStatus) swipeStatus.textContent = msg;
@@ -608,6 +661,18 @@ TEMPLATE = """
                 document.querySelectorAll('#overlay_grid button[data-label]').forEach(btn => {
                     btn.addEventListener('click', () => performLabel(btn.dataset.label, 'overlay'));
                 });
+
+                // Pre-populate overlay with server-side predictions
+                if (overlayInfo && serverPredictions) {
+                    const label_names = {{ predictions.keys()|list|tojson }};
+                    const rows = label_names.map(lbl => {
+                        const prob = serverPredictions[lbl];
+                        const pct = prob !== undefined ? (prob * 100).toFixed(2) + '%' : '';
+                        const bold = lbl === topPredLabel ? 'font-weight:600;' : '';
+                        return `<div style="display:flex; justify-content:space-between; gap:8px; ${bold}"><span>${lbl}</span><span>${pct}</span></div>`;
+                    }).join('');
+                    overlayInfo.innerHTML = `<div style="margin-bottom:6px;">Current label: <strong>${originalLabel || ''}</strong></div><div style="margin-bottom:6px;">Model prediction: <strong>${topPredLabel || ''}</strong></div>${rows}`;
+                }
 
                 let touchStartX = 0;
                 let touchStartY = 0;
@@ -840,169 +905,6 @@ TEMPLATE = """
                     const fired = handleSwipe(dx, dy, vx, vy);
                     if (!fired) resetCard();
                 });
-
-                if (!window._liteRtPromise) {
-                        window._liteRtPromise = loadLiteRt("https://cdn.jsdelivr.net/npm/@litertjs/core@0.2.1/wasm/");
-                }
-                await window._liteRtPromise;
-
-                if (!window._birdModelPromise) {
-                        window._birdModelPromise = (async () => {
-                                const buffer = await fetch("/model").then(r => r.arrayBuffer());
-                                return await loadAndCompile(
-                                        new Uint8Array(buffer),
-                                        { accelerator: webGpu ? "webgpu" : "wasm" }
-                                );
-                        })();
-                }
-                const model = await window._birdModelPromise;
-
-        const fileBuffer = await fetch("/sound/{{ filepath }}").then(response => response.arrayBuffer());
-
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        let decoded;
-        try {
-            decoded = await audioCtx.decodeAudioData(fileBuffer.slice(0));
-        } catch (err) {
-            decoded = await new Promise((resolve, reject) => {
-                audioCtx.decodeAudioData(fileBuffer.slice(0), resolve, reject);
-            });
-        }
-
-        const targetRate = 48000;
-        const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-
-        let samples;
-
-        if (OfflineCtx) {
-            try {
-                const length = Math.ceil(decoded.duration * targetRate);
-                const offlineCtx = new OfflineCtx(1, Math.max(1, length), targetRate);
-                const bufferSource = offlineCtx.createBufferSource();
-                bufferSource.buffer = decoded;
-                bufferSource.connect(offlineCtx.destination);
-                bufferSource.start(0);
-                const renderedBuffer = await offlineCtx.startRendering();
-                samples = renderedBuffer.getChannelData(0);
-            } catch (err) {
-                console.warn('OfflineAudioContext resampling failed, using linear interpolation.', err);
-            }
-        }
-
-        if (!samples) {
-            const origRate = decoded.sampleRate;
-            samples = decoded.getChannelData(0);
-
-            if (origRate !== targetRate) {
-                const ratio = origRate / targetRate;
-                const newLen = Math.ceil(samples.length / ratio);
-                const output = new Float32Array(newLen);
-                for (let i = 0; i < newLen; i++) {
-                    const srcIndex = i * ratio;
-                    const i0 = Math.floor(srcIndex);
-                    const i1 = Math.min(i0 + 1, samples.length - 1);
-                    const frac = srcIndex - i0;
-                    output[i] = samples[i0] * (1 - frac) + samples[i1] * frac;
-                }
-
-                samples = output;
-            }
-        }
-
-        await audioCtx.close();
-
-        const shape = [1, samples.length];
-        const inputTensor = new Tensor(samples, shape);
-        if (webGpu) inputTensor.moveTo("webgpu");
-
-        let outputs;
-        let startTime, endTime;
-        try {
-            startTime = performance.now();
-            outputs = await model.run(inputTensor);
-            endTime = performance.now();
-        } catch (err) {
-            startTime = performance.now();
-            outputs = await model.run([inputTensor]);
-            endTime = performance.now();
-        }
-
-        console.log(`Inference took ${endTime - startTime} ms`);
-
-        inputTensor.delete();
-
-        const outs = Array.isArray(outputs) ? outputs : [outputs];
-        const out = outs[0];
-        try {
-            const cpu = webGpu ? await out.moveTo('wasm') : out;
-            const typed = cpu.toTypedArray();
-            // keep label_names in sync with your model
-            const label_names = ['BC', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', 'XB']
-            const probs = Array.from(typed);
-            const probsPct = probs.map(x => (Math.round(x * 10000) / 100).toFixed(2) + '%');
-            const result = Object.fromEntries(label_names.map((lbl, i) => [lbl, probsPct[i] ?? '']));
-            modelResult = { probsPct, label_names };
-
-            const modelLabelsStr = Object.entries(result).map(([label, prob]) => `${label}=${prob}`).join(',');
-            // set model_labels into both hidden fields (buttons and custom forms)
-            const mb = document.getElementById('model_labels_buttons');
-            const mc = document.getElementById('model_labels_custom');
-            if (mb) mb.value = modelLabelsStr;
-            if (mc) mc.value = modelLabelsStr;
-
-            // append probs to existing buttons, and collect labels missing DOM buttons
-            const missing = [];
-            const max = Math.max(...probs);
-            const maxLabel = label_names[probs.indexOf(max)];
-
-            label_names.forEach(label => {
-                const elem = document.getElementById(label);
-                if (elem) {
-                    // append probability to button text (preserve existing inner text)
-                    elem.innerHTML = label + ' (' + result[label] + ')';
-                    if (label === maxLabel) {
-                        elem.style.fontWeight = 'bold';
-                    }
-                } else {
-                    missing.push({label, prob: result[label]});
-                }
-            });
-
-            // render missing predictions under the buttons
-            const extras = document.getElementById('extra_predictions');
-            extras.innerHTML = '';
-            if (missing.length > 0) {
-                missing.forEach(item => {
-                    const pill = document.createElement('div');
-                    pill.className = 'pred-pill';
-                    pill.textContent = item.label + ' — ' + item.prob;
-                    extras.appendChild(pill);
-                });
-            } else {
-                // optional: show top prediction if nothing missing
-                const top = document.createElement('div');
-                top.className = 'pred-pill';
-                top.textContent = 'Top prediction: ' + maxLabel + ' (' + (Math.round(max*10000)/100).toFixed(2) + '%)';
-                extras.appendChild(top);
-            }
-
-            topPredLabel = maxLabel;
-            setStatus('Model suggests ' + maxLabel + ' — swipe right to accept');
-
-            if (overlayInfo) {
-                const rows = label_names.map((lbl, i) => {
-                    const pct = probsPct[i] || '';
-                    const bold = lbl === maxLabel ? 'font-weight:600;' : '';
-                    return `<div style="display:flex; justify-content:space-between; gap:8px; ${bold}"><span>${lbl}</span><span>${pct}</span></div>`;
-                }).join('');
-                overlayInfo.innerHTML = `<div style="margin-bottom:6px;">Current label: <strong>${originalLabel || ''}</strong></div>${rows}`;
-            }
-
-            cpu.delete();
-        } catch (err) {
-            console.warn('Failed to read output tensor:', err);
-            console.log('Failed to read output tensor: ' + err);
-        }
 
       })();
 
