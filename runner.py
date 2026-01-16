@@ -48,7 +48,7 @@ def process_audio(audio, batch_size=8, thread_count=8):
     interpreter.resize_tensor_input(input_details[0]['index'], [batch_size, 192000])
     interpreter.allocate_tensors()
 
-    prediction = [] # [(start, end, label, confidence)]
+    prediction : tuple[float, float, str, float] = [] # [(start, end, label, confidence)]
 
     # Collect chunks into batches
     batch_chunks = []
@@ -139,11 +139,12 @@ async def process(file: UploadFile):
     logger.info(f"Processing took {end - start:.2f} seconds")
 
     return JSONResponse({
-        "representantId": 0, # todo
+        "representantId": "Deprecated, use 'isRepresentant' field in 'segments'. Multiple representants are allowed", # todo: make backend aware of this API change
         "segments": [
             {
                 "interval": [pred_start, pred_end],
                 "label": label,
+                "isRepresentant": confidence >= MIN_CONFIDENCE_PERCENT,
                 "fullPredictions": pred_percents
             }
             for pred_start, pred_end, label, confidence, pred_percents in merged_segments
