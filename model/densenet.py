@@ -25,15 +25,87 @@ from layers.global_gem2d import GlobalGeMPool2D
 from layers.attentive_stats_pool import AttentiveStatsPool
 from layers.mel_to_magma import mel_to_magma
 from layers.densenet import DenseNet
+from layers.spec_augument import SpecAugment
 
 
-LOCAL_WORKSPACE = '/content'
-WORKSPACE = '/content/drive/MyDrive/strnadi-data'
+def compute_delta_features(spect, win=2):
+    """
+    Compute delta and delta-delta features from mel spectrogram along the time axis.
+    spect: (B, T, F) — batch, time, freq
+    Returns: (B, T, F, 2) — delta and delta-delta stacked as channels
+    """
+    # Central difference: delta[t] = (x[t+win] - x[t-win]) / (2*win)
+    pad = win
+    padded = tf.pad(spect, [[0, 0], [pad, pad], [0, 0]], mode="edge")
+    delta = (padded[:, 2 * pad :, :] - padded[:, :-2 * pad, :]) / (2.0 * pad)
+
+    # Delta-delta: apply same to delta
+    delta_padded = tf.pad(delta, [[0, 0], [pad, pad], [0, 0]], mode="edge")
+    delta_delta = (delta_padded[:, 2 * pad :, :] - delta_padded[:, :-2 * pad, :]) / (
+        2.0 * pad
+    )
+
+    # Stack as channels and transpose to (B, F, T, 2) for CNN (freq=height, time=width)
+    stacked = tf.stack([delta, delta_delta], axis=-1)
+    # Transpose: (B, T, F, 2) -> (B, F, T, 2)
+    return tf.transpose(stacked, [0, 2, 1, 3])
+
+
+def compute_deltas(spec):
+    """
+    Computes Delta and Delta-Delta using fixed Convolutions (TFLite friendly).
+    Replaces manual array slicing (StridedSlice) with tf.nn.conv2d.
+    
+    Input:  (Batch, Time, Freq, 1)
+    Output: delta (B, T, F, 1), delta2 (B, T, F, 1)
+    """
+    
+    # 1. Define Fixed Kernels for Finite Difference
+    # Shape needed for Conv2D: (Kernel_Height, Kernel_Width, In_Channels, Out_Channels)
+    # We want to slide over Time (Height), so Kernel is (3, 1, 1, 1)
+    
+    # First Derivative Kernel: [-0.5, 0, 0.5]
+    # (Corresponds to (x[t+1] - x[t-1]) * 0.5)
+    k_delta_vals = [-0.5, 0.0, 0.5]
+    kernel_delta = tf.constant(k_delta_vals, dtype=spec.dtype)
+    kernel_delta = tf.reshape(kernel_delta, [3, 1, 1, 1])
+    
+    # Second Derivative Kernel: [1, -2, 1]
+    # (Corresponds to x[t+1] - 2x[t] + x[t-1])
+    k_delta2_vals = [1.0, -2.0, 1.0]
+    kernel_delta2 = tf.constant(k_delta2_vals, dtype=spec.dtype)
+    kernel_delta2 = tf.reshape(kernel_delta2, [3, 1, 1, 1])
+
+    # 2. Handle Padding (To match your 'SYMMETRIC' logic)
+    # If we use padding='SAME' in conv2d, it uses Zeros. 
+    # To keep your Symmetric padding, we pad explicitly first.
+    # Pad 1 step on Time axis (axis 1)
+    spec_pad = tf.pad(spec, [[0,0], [1,1], [0,0], [0,0]], mode='SYMMETRIC')
+
+    # 3. Perform Convolution
+    # stride=1, padding='VALID' (because we manually padded)
+    delta = tf.nn.conv2d(spec_pad, kernel_delta, strides=[1, 1, 1, 1], padding='VALID')
+    delta2 = tf.nn.conv2d(spec_pad, kernel_delta2, strides=[1, 1, 1, 1], padding='VALID')
+    
+    return delta, delta2
+
+def add_physics_channels(spec):
+    # Ensure input is 4D: (Batch, Time, Freq, 1)
+    if len(spec.shape) == 3:
+        x = tf.expand_dims(spec, axis=-1)
+    else:
+        x = spec
+
+    # Compute features using the Conv method
+    delta, delta2 = compute_deltas(x)
+    
+    # Concatenate: (Batch, Time, Freq, 3)
+    return tf.concat([x, delta, delta2], axis=-1)
+
+WORKSPACE = '/workspace'
 
 AUDIO_EXTENSIONS = [".wav", ".mp3", ".flac", ".ogg", ".aiff"]
-REMOTE_DATASET = os.path.join(WORKSPACE, 'new-data.zip')
-DATASET = os.path.join(LOCAL_WORKSPACE, 'dataset-v3.zip')
-DATASET_DIR = os.path.join(LOCAL_WORKSPACE, 'dataset-v3')
+DATASET_DIR = os.path.join(WORKSPACE, 'dataset')
 SAMPLE_RATE, SAMPLE_SECONDS = 48000, 4
 BATCH_SIZE = 32
 
@@ -166,8 +238,8 @@ def load_data(directory, validation_split=0.3, batch_size=BATCH_SIZE, shuffle=Tr
     )
 
     # Apply batching and prefetching and caching
-    train_dataset = train_dataset.batch(batch_size).repeat().prefetch(tf.data.AUTOTUNE).cache()
-    val_dataset   = val_dataset.batch(batch_size).repeat().prefetch(tf.data.AUTOTUNE).cache()
+    train_dataset = train_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE).cache().shuffle(buffer_size=len(train_files))
+    val_dataset   = val_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE).cache().shuffle(buffer_size=len(val_files))
 
     train_steps    = math.floor(len(train_files) / batch_size)
     val_steps      = math.floor(len(val_files)   / batch_size)
@@ -192,37 +264,49 @@ def make_model():
         fft_length=1024,
         power_to_db=True
     )(inp)
-    image = keras.layers.Lambda(mel_to_magma)(spect)
 
-    # blocks=[6, 12, 12, 8] — roughly half the depth
-    # blocks=[4, 8, 16, 12] — even smaller
+    spect = SpecAugment(
+        freq_mask_param=27,      # F  in the paper
+        time_mask_param=80,      # T  in the paper  (tune to your hop/window settings)
+        num_freq_masks=2,        # mF in the paper
+        num_time_masks=2,        # mT in the paper
+        max_time_mask_ratio=0.2, # p  in the paper
+        mask_value=0.0,
+        name="spec_augment",
+    )(spect)
 
-    cnn = DenseNet(
-        blocks=[4, 8, 16, 12],
-        include_top=False,
-        weights=None,
-        pooling=None,
-        # input_tensor=image,
-        # input_shape=(128, 376, 3),
-    )
+    spect = keras.layers.Lambda(mel_to_magma)(spect)
 
-    # cnn = keras.applications.DenseNet121(
-    #     weights="imagenet",
+    # Delta and delta-delta features instead of raw spectrogram image
+    # delta_features = keras.layers.Lambda(add_physics_channels)(spect)
+
+    # cnn = DenseNet(
+    #     # blocks=[2, 4, 8, 6],
+    #     blocks=[4, 8, 16, 12],
     #     include_top=False,
+    #     weights=None,
     #     pooling=None
     # )
 
-    x = cnn(image)
+    cnn = keras.applications.DenseNet121(
+        weights="imagenet",
+        include_top=False,
+        pooling=None
+    )
+
+    x = cnn(spect)
     # x = GlobalGeMPool2D()(x)
 
     x = AttentiveStatsPool()(x)
 
-    x = keras.layers.Dense(256, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01))(x)
+    x = keras.layers.BatchNormalization()(x)
+
+    x = keras.layers.Dense(256, activation='silu')(x)
     x = keras.layers.Dropout(0.3)(x)
-    x = keras.layers.Dense(64, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01))(x)
+    x = keras.layers.Dense(64, activation='silu')(x)
     x = keras.layers.Dropout(0.3)(x)
 
-    outp = keras.layers.Dense(7, activation='softmax')(x)
+    outp = keras.layers.Dense(num_classes, activation='softmax')(x)
     return keras.Model(inputs=inp, outputs=outp)
 
 
@@ -276,6 +360,13 @@ history = model.fit(
         keras.callbacks.BackupAndRestore(backup_dir, double_checkpoint=True),
         keras.callbacks.TensorBoard(
             log_dir=tensorboard_dir
+        ),
+        keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.1,
+            patience=5,
+            min_lr=1e-6,
+            verbose=1
         )
     ]
 )

@@ -1,6 +1,6 @@
 keras
-tensorflow
+tensorflow[and-cuda]
 librosa
-sklearn
+scikit-learn
 imblearn
 numpy
