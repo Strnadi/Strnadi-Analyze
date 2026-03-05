@@ -4,7 +4,7 @@ services:
     build:
       context: .
       args:
-        - HOST_MODEL_PATH=model.keras
+        - HOST_MODEL_PATH=good-model-2.tflite
 
     environment:
       - MIN_CONFIDENCE_PERCENT=70
@@ -12,12 +12,4 @@ services:
       - MODEL_LABELS=BC,BE,BhBl,BlBh,None,Unfinished,XB
 
     ports:
-      - "8000:8000"
-
-    networks:
-      - strnadi-ai
-  
-networks:
-  strnadi-ai:
-    external: true
-    name: strnadi-ai
+      - "9197:8000"

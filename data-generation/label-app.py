@@ -13,13 +13,17 @@ import matplotlib
 from flask import Flask, render_template_string, send_file, request, redirect, url_for, session, make_response, abort, g
 from threading import Lock
 from ai_edge_litert.interpreter import Interpreter
+import logging
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 app = Flask(__name__, static_folder='')
+app.logger.setLevel(logging.INFO)
+
 
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "database.db")
+MODEL_LABELS = ["BC", "BE", "BhBl", "BlBh", "None", "Unfinished", "XB"]
 
 
 def get_db():
@@ -35,6 +39,53 @@ def close_db(exception):
     if db is not None:
         db.close()
 
+# Configure a dedicated access logger (file or stdout)
+access_logger = logging.getLogger("access")
+access_logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+# formatter may reference attributes provided via logging.extra
+fmt = '%(remote_addr)s - %(user)s [%(asctime)s] "%(method)s %(path)s %(protocol)s" %(status)d took %(duration_ms)dms (sent %(content_length)s bytes)'
+handler.setFormatter(logging.Formatter(fmt))
+access_logger.addHandler(handler)
+
+# Avoid duplicate lines from Werkzeug's own logger
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+@app.before_request
+def start_timer():
+    g.start_time = time.perf_counter()
+
+@app.after_request
+def log_request(response):
+    # compute duration
+    start = getattr(g, "start_time", None)
+    duration_ms = int((time.perf_counter() - start) * 1000) if start else -1
+
+    # content length (dash if unknown)
+    try:
+        content_length = response.calculate_content_length()
+    except Exception:
+        content_length = None
+    content_length = content_length if content_length is not None else "-"
+
+    # supply fields to formatter via extra
+    access_logger.info(
+        "",  # message can be empty; formatter will use extra fields
+        extra={
+            "remote_addr": request.remote_addr or "-",
+            "user": getattr(request, "remote_user", "-") or "-",
+            "method": request.method,
+            "path": request.full_path if request.query_string else request.path,
+            "protocol": request.environ.get("SERVER_PROTOCOL", "-"),
+            "status": response.status_code,
+            "content_length": content_length,
+            "duration_ms": duration_ms,
+        },
+    )
+
+    # optional: expose timing header for clients
+    response.headers["X-Response-Time"] = f"{duration_ms}ms"
+    return response
 
 def init_db():
     db = get_db()
@@ -52,7 +103,9 @@ def init_db():
         timestamp INTEGER,
         original_label TEXT,
         user_label TEXT,
-        model_labels TEXT
+        model_labels TEXT,
+        locked_until INTEGER,
+        locked_for INTEGER
     )"""
     )
 
@@ -94,10 +147,7 @@ def get_session_id():
 
 
 def get_all_labels():
-    cur = db_cursor()
-    cur.execute("SELECT DISTINCT original_label FROM labels UNION SELECT DISTINCT user_label FROM labels")
-    labels = cur.fetchall()
-    return [label[0] for label in labels]
+    return MODEL_LABELS
 
 
 def choose_class(label, curr_label):
@@ -143,7 +193,6 @@ def format_prob(prob: float) -> str:
     """Format probability as percentage string"""
     return f"{prob * 100:.2f}%"
 
-MODEL_LABELS = ["BC", "BE", "BhBl", "BlBh", "None", "Unfinished", "XB"]
 
 interpreter = Interpreter(model_path="good-model-1.tflite", num_threads=8)
 input_details = interpreter.get_input_details()
@@ -157,17 +206,26 @@ def index():
 
     cur = db_cursor()
 
+    session_id = get_session_id()
+    current_time = int(time.time())
+    lock_duration = 300  # seconds
+
     if requested_file:
         cur.execute(
-            "SELECT filepath, original_label FROM labels WHERE filepath = ? LIMIT 1",
-            (requested_file,),
-        )
-    else:
-        cur.execute(
-            "SELECT filepath, original_label FROM labels WHERE user_label IS NULL ORDER BY RANDOM() LIMIT 1"
+            "SELECT filepath, original_label FROM labels WHERE filepath = ? AND (locked_until IS NULL OR locked_until < ? OR (locked_until >= ? AND locked_for = ?)) LIMIT 1",
+            (requested_file, current_time, current_time, session_id)
         )
 
-    row = cur.fetchone()
+        row = cur.fetchone()
+
+    if not requested_file or (requested_file and not row):
+        cur.execute(
+            "SELECT filepath, original_label FROM labels WHERE user_label IS NULL AND (locked_until IS NULL OR locked_until < ? OR (locked_until >= ? AND locked_for = ?)) ORDER BY RANDOM() LIMIT 1",
+            (current_time, current_time, session_id)
+        )
+
+        row = cur.fetchone()
+
     if not row:
         return "No files left to label! 🎉"
 
@@ -184,9 +242,17 @@ def index():
 
     # print(predictions)
 
-    sid = get_session_id()
-    cur.execute("SELECT COUNT(*) FROM undo_stack WHERE session_id = ?", (sid,))
+    cur.execute("SELECT COUNT(*) FROM undo_stack WHERE session_id = ?", (session_id,))
     undo_count = cur.fetchone()[0]
+
+    cur.execute("""
+        UPDATE labels
+        SET locked_until = ?,
+            locked_for = ?
+        WHERE filepath = ?
+        """, (current_time + lock_duration, session_id, filepath))
+
+    get_db().commit()
 
     top_label, top_prob = get_top_prediction(predictions)
     
@@ -223,30 +289,6 @@ def spectrogram(filepath):
     return send_file(buf, mimetype='image/png')
 
 
-@app.route("/sound/<path:filepath>")
-def sound(filepath):
-    if not os.path.exists(filepath):
-        return "File not found", 404
-
-    audio = load_and_normalize_audio(filepath)
-    int16 = (audio * 32767.0).astype(np.int16)
-
-    buf = io.BytesIO()
-    with wave.open(buf, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(48000)  # Same sample rate as load_and_normalize_audio
-        wf.writeframes(int16.tobytes())
-
-    buf.seek(0)
-    return send_file(buf, mimetype='audio/wav')
-
-
-# @app.route("/model")
-# def model():
-#     return send_file("good-model-1.tflite", mimetype='application/octet-stream', conditional=True, last_modified=datetime.datetime.fromtimestamp(os.path.getmtime("good-model-1.tflite")))
-
-
 @app.route("/label", methods=["POST"])
 def label_file():
     filepath = request.form["filepath"]
@@ -254,12 +296,21 @@ def label_file():
     sid = get_session_id()
     cur = db_cursor()
 
-    # Check if the file is already labeled
-    cur.execute("SELECT user_label FROM labels WHERE filepath = ?", (filepath,))
+    # # Check if the file is already labeled
+    # cur.execute("SELECT user_label FROM labels WHERE filepath = ?", (filepath,))
+    # row = cur.fetchone()
+    # if row and row[0] is not None:
+    #     # File is already labeled, so just return to index page (silent fail)
+    #     return redirect(url_for("index"))
+
+    cur.execute("SELECT locked_until, locked_for FROM labels WHERE filepath = ?", (filepath,))
     row = cur.fetchone()
-    if row and row[0] is not None:
-        # File is already labeled, so just return to index page (silent fail)
-        return redirect(url_for("index"))
+    if row:
+        locked_until, locked_for = row
+        current_time = int(time.time())
+        if locked_until and locked_until >= current_time and locked_for != sid:
+            # File is locked by another session, so just return to index page (silent fail)
+            return redirect(url_for("index"))
 
     cur.execute("""
         UPDATE labels
@@ -303,45 +354,49 @@ def undo():
 
 
 # ---------- template ----------
-TEMPLATE = """
+
+# For syntax highlighting (Python Inline Source Syntax Highlighting extension)
+html = str
+
+TEMPLATE: html = """
 <!DOCTYPE html>
 <html>
-  <head>
-    <style>
-      button {
-        /* width: 100px; */ height: 60px; margin:5px;
-      }
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            button {
+                /* width: 100px; */
+                height: 60px;
+                margin: 5px;
+            }
+
             .page {
                 width: 100%;
                 /* max-width: 1200px; */
                 /* margin: 10px; */
                 position: relative;
-                transition: transform 0.18s ease, opacity 0.18s ease;
-                will-change: transform, opacity;
-                background: #fff;
-                border-radius: 16px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1);
-                padding: 16px;
-                margin: 12px;
-                max-width: calc(100% - 24px);
-                box-sizing: border-box;
             }
+
             .page.swiping {
                 transition: none;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.15);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
             }
+
             .page.swipe-right {
                 transform: translateX(150vw) rotate(15deg);
                 opacity: 0;
             }
+
             .page.swipe-left {
                 transform: translateX(-150vw) rotate(-15deg);
                 opacity: 0;
             }
+
             .page.swipe-up {
                 transform: translateY(-150vh) rotate(-5deg);
                 opacity: 0;
             }
+
             .media-row {
                 display: flex;
                 flex-direction: row;
@@ -350,79 +405,112 @@ TEMPLATE = """
                 justify-content: center;
                 gap: 2rem;
             }
+
             .media-img {
                 max-width: 600px;
                 width: 100%;
             }
-      .btn-label { }
-      .btn-current { background-color: green; color: white; }
-      .btn-unfinished { background-color: orange; color: white; }
-      .btn-none { background-color: red; color: white; }
-      .undo-btn {
-        margin-top: 5px;
-        width: 120px;
-        height: 40px;
-        background-color: #555;
-        color: white;
-      }
-      .skip-btn {
-        margin-top: 5px;
-        width: 120px;
-        height: 40px;
-        background-color: #555;
-        color: white;
-      }
-      .status-msg { color: #222; margin-bottom: 8px; }
-      /* extra predictions area */
-      #extra_predictions {
-        margin-top: 12px;
-        border-top: 1px solid #ddd;
-        padding-top: 12px;
-        display:flex;
-        flex-wrap:wrap;
-        justify-content:center;
-        gap:8px;
-      }
-      .pred-pill {
-        padding:6px 10px;
-        border-radius:8px;
-        background:#f4f4f4;
-        font-size:90%;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-      }
-      .custom-form {
-        margin-top: 12px;
-      }
-      input[name="label"] {
-        padding:8px;
-        height:36px;
-        width:240px;
-        font-size:14px;
-      }
-      .custom-submit {
-        height:36px;
-        margin-left:6px;
-      }
-            .desktop-only { }
-            .mobile-only { display:none; }
+
+            .btn-label {}
+
+            .btn-current {
+                background-color: green;
+                color: white;
+            }
+
+            .btn-unfinished {
+                background-color: orange;
+                color: white;
+            }
+
+            .btn-none {
+                background-color: red;
+                color: white;
+            }
+
+            .undo-btn {
+                margin-top: 5px;
+                width: 120px;
+                height: 40px;
+                background-color: #555;
+                color: white;
+            }
+
+            .skip-btn {
+                margin-top: 5px;
+                width: 120px;
+                height: 40px;
+                background-color: #555;
+                color: white;
+            }
+
+            .status-msg {
+                color: #222;
+                margin-bottom: 8px;
+            }
+
+            /* extra predictions area */
+            #extra_predictions {
+                margin-top: 12px;
+                border-top: 1px solid #ddd;
+                padding-top: 12px;
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px;
+            }
+
+            .pred-pill {
+                padding: 6px 10px;
+                border-radius: 8px;
+                background: #f4f4f4;
+                font-size: 90%;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            }
+
+            .custom-form {
+                margin-top: 12px;
+            }
+
+            input[name="label"] {
+                padding: 8px;
+                height: 36px;
+                width: 240px;
+                font-size: 14px;
+            }
+
+            .custom-submit {
+                height: 36px;
+                margin-left: 6px;
+            }
+
+            .desktop-only {}
+
+            .mobile-only {
+                display: none;
+            }
+
             .swipe-hint {
                 margin-top: 10px;
                 color: #444;
                 font-size: 14px;
             }
+
             .labels-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(0,0,0,0.45);
+                background: rgba(0, 0, 0, 0.45);
                 display: none;
                 align-items: center;
                 justify-content: center;
                 z-index: 20;
                 padding: 18px;
             }
+
             .labels-overlay.open {
                 display: flex;
             }
+
             .labels-sheet {
                 background: #fff;
                 width: 100%;
@@ -430,72 +518,103 @@ TEMPLATE = """
                 max-height: 90vh;
                 overflow-y: auto;
                 border-radius: 14px;
-                box-shadow: 0 10px 36px rgba(0,0,0,0.18);
+                box-shadow: 0 10px 36px rgba(0, 0, 0, 0.18);
                 padding: 16px;
             }
+
             .labels-sheet h4 {
                 margin: 0 0 10px 0;
             }
+
             .labels-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
                 gap: 8px;
             }
+
             .labels-grid button {
                 height: 44px;
                 border-radius: 10px;
             }
+
             .overlay-close {
                 margin-top: 12px;
                 width: 100%;
                 height: 40px;
             }
+
             #swipe_zone {
                 width: 100%;
             }
+
             @media (max-width: 768px) {
                 body {
                     /* padding: 12px; */
                 }
+
                 .page {
                     max-width: 100%;
+                    transition: transform 0.18s ease, opacity 0.18s ease;
+                    will-change: transform, opacity;
+                    background: #fff;
+                    border-radius: 16px;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+                    padding: 16px;
+                    margin: 12px;
+                    max-width: calc(100% - 24px);
+                    box-sizing: border-box;
                 }
+
                 h3 {
                     font-size: 16px;
                     margin-bottom: 10px;
                     word-break: break-word;
                 }
+
                 .media-row {
                     flex-direction: column;
                     gap: 12px;
                 }
+
                 .media-img {
                     max-width: 100%;
                     width: 100%;
                 }
+
                 button {
                     width: 100%;
                     max-width: 320px;
                 }
+
                 .swipe-hint {
                     font-size: 13px;
                 }
+
                 .labels-sheet {
                     padding: 14px;
                 }
+
                 .custom-form input[name="label"] {
                     width: 100%;
                     max-width: 320px;
                 }
+
                 .custom-submit {
                     width: 100%;
                     max-width: 320px;
                     margin-left: 0;
                     margin-top: 6px;
                 }
-                .desktop-only { display:none; }
-                .mobile-only { display:block; }
+
+                .desktop-only {
+                    display: none;
+                }
+
+                .mobile-only {
+                    display: block;
+                }
             }
+
             .swipe-tooltip {
                 position: fixed;
                 top: 50%;
@@ -512,83 +631,81 @@ TEMPLATE = """
                 transition: opacity 0.2s;
                 z-index: 100;
             }
+
             .swipe-tooltip.visible {
                 opacity: 1;
             }
-    </style>
-
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-  </head>
+        </style>
+    </head>
     <body style="overflow: hidden; width: 100vw; margin: 0; background: #fff; min-height: 100vh;">
         <div id="swipe_tooltip" class="swipe-tooltip"></div>
-        <div style="font-family: sans-serif; text-align: center; display: flex; flex-direction: column; align-items: center; margin: 10px;">
+        <div
+            style="font-family: sans-serif; text-align: center; display: flex; flex-direction: column; align-items: center; margin: 10px;">
             <div id="swipe_zone" class="page">
                 <h3>{{ filepath }}</h3>
                 <div class="media-row">
                     <img class="media-img" src="{{ url_for('spectrogram', filepath=filepath) }}" width="600"><br>
-                    <img class="media-img" src="{{ url_for('static', filename='dialekty.png') }}" alt="Logo" width="600"><br>
+                    <img class="media-img" src="{{ url_for('static', filename='dialekty.png') }}" alt="Logo"
+                        width="600"><br>
                 </div>
-                
+
                 <!-- Server-side prediction info -->
-                <div id="server_prediction" style="margin-top: 8px; padding: 8px; border-radius: 8px; display: {% if top_prediction %}block{% else %}none{% endif %};">
+                <div class="mobile-only">
                     <strong>Model prediction:</strong> {{ top_prediction }} ({{ format_prob(top_prob) if top_prediction else '' }})
                 </div>
 
-                <div id="server_prediction" style="margin-top: 8px; padding: 8px; border-radius: 8px; display: {% if top_prediction %}block{% else %}none{% endif %};">
+                <div class="mobile-only">
                     <strong>Original label:</strong> {{ current_label }}
                 </div>
                 <div class="swipe-hint mobile-only" aria-live="polite" id="swipe_status">Swipe right = model • Swipe up = original • Swipe left = all labels</div>
-            
+
                 <!-- BUTTONS FORM -->
                 <form id="buttons_form" class="desktop-only" action="/label" method="post">
-                  {% for label in labels %}
-            <button
-              type="submit"
-              name="label"
-              id="{{ label }}"
-              style="cursor: pointer;{% if label == top_prediction %} font-weight: bold;{% endif %}"
-              class="{{ choose_class(label, current_label) }}"
-              value="{{ label }}"
-            >{{ label }}{% if label in predictions %} ({{ format_prob(predictions[label]) }}){% endif %}</button>
-                  {% endfor %}
-            
-                  <input type="hidden" name="filepath" value="{{ filepath }}">
-                  <input type="hidden" id="model_labels_buttons" name="model_labels" value="{{ tocsv(predictions) }}">
-                <input type="hidden" id="swipe_label_input" name="label" value="" disabled>
+                    {% for label in labels %}
+                    <button type="submit" name="label" id="{{ label }}"
+                        style="cursor: pointer;{% if label == top_prediction %} font-weight: bold;{% endif %}"
+                        class="{{ choose_class(label, current_label) }}" value="{{ label }}">{{ label }}{% if label in predictions %} ({{ format_prob(predictions[label]) }}){% endif %}
+                    </button>
+                    {% endfor %}
+
+                    <input type="hidden" name="filepath" value="{{ filepath }}">
+                    <input type="hidden" id="model_labels_buttons" name="model_labels" value="{{ tocsv(predictions) }}">
+                    <input type="hidden" id="swipe_label_input" name="label" value="" disabled>
                 </form>
-            
+
                 <!-- CUSTOM LABEL FORM (separate so text input can be used) -->
-            <div class="custom-form desktop-only">
-                <form id="custom_form" action="/label" method="post" style="display:inline-block;">
-            <input type="hidden" name="filepath" value="{{ filepath }}">
-            <input type="hidden" id="model_labels_custom" name="model_labels" value="{{ tocsv(predictions) }}">
-            <input type="text" id="custom_label_input" name="label" placeholder="Custom dialect">
-            <button type="submit" class="custom-submit" style="cursor: pointer;">Submit Custom</button>
-                  </form>
+                <div class="custom-form desktop-only">
+                    <form id="custom_form" action="/label" method="post" style="display:inline-block;">
+                        <input type="hidden" name="filepath" value="{{ filepath }}">
+                        <input type="hidden" id="model_labels_custom" name="model_labels" value="{{ tocsv(predictions) }}">
+                        <input type="text" id="custom_label_input" name="label" placeholder="Custom dialect">
+                        <button type="submit" class="custom-submit" style="cursor: pointer;">Submit Custom</button>
+                    </form>
                 </div>
-            
+
                 <!-- extra predictions will be inserted here by JS for labels that don't have buttons -->
                 <div id="extra_predictions" aria-live="polite" aria-atomic="true"></div>
-            
+
                 <br>
-            
+
                 <form action="/undo" method="post" style="display:inline-block;">
-                  <button type="submit" class="undo-btn" style="cursor: pointer;" {% if not undo_available %}disabled{% endif %}>
-            Undo {% if undo_available %}({{ undo_count }}){% endif %}
-                  </button>
+                    <button type="submit" class="undo-btn" style="cursor: pointer;" {% if not undo_available %}disabled{% endif %}>
+                        Undo {% if undo_available %}({{ undo_count }}){% endif %}
+                    </button>
                 </form>
-            
+
                 <form action="/" style="display:inline-block;">
-                  <button type="submit" class="skip-btn" style="cursor: pointer;">Skip</button>
+                    <button type="submit" class="skip-btn" style="cursor: pointer;">Skip</button>
                 </form>
             </div>
             <div class="labels-overlay" id="labels_overlay" aria-hidden="true">
                 <div class="labels-sheet" role="dialog" aria-modal="true" aria-label="All labels">
                     <h4>Pick a label</h4>
-                    <div id="overlay_info" class="mobile-only" style="text-align:left; font-size:14px; margin-bottom:10px;"></div>
+                    <div id="overlay_info" class="mobile-only" style="text-align:left; font-size:14px; margin-bottom:10px;">
+                    </div>
                     <div class="labels-grid" id="overlay_grid">
                         {% for label in labels %}
-                            <button type="button" class="btn-label" data-label="{{ label }}">{{ label }}</button>
+                        <button type="button" class="btn-label" data-label="{{ label }}">{{ label }}</button>
                         {% endfor %}
                     </div>
                     <button type="button" class="overlay-close" id="overlay_close">Close</button>
@@ -596,10 +713,9 @@ TEMPLATE = """
             </div>
         </div>
 
-    <script>
-      (function() {
-
-                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        <script>
+            (function() {
+                const isMobile = /Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
                 const originalLabel = {{ current_label|tojson }};
                 const swipeStatus = document.getElementById('swipe_status');
                 const buttonsForm = document.getElementById('buttons_form');
@@ -905,14 +1021,12 @@ TEMPLATE = """
                     const fired = handleSwipe(dx, dy, vx, vy);
                     if (!fired) resetCard();
                 });
-
-      })();
-
-    </script>
-  </body>
+            })();
+        </script>
+    </body>
 </html>
 """
 
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=8978)
+    app.run(debug=False, host="0.0.0.0", port=8977)
 

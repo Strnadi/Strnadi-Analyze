@@ -40,13 +40,25 @@ def chunk_audio(audio, clip_length=4.0, step=0.5, target_sr=SAMPLE_RATE):
         end_s = start_s + clip_length
         yield chunk, start_s, end_s
 
-def process_audio(audio, batch_size=8, thread_count=8):
-    interpreter = Interpreter(model_path=MODEL_PATH, num_threads=thread_count)
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
+num_threads = None
+num_batch = None
+interpreter = None
+input_details = None
+output_details = None
 
-    interpreter.resize_tensor_input(input_details[0]['index'], [batch_size, 192000])
-    interpreter.allocate_tensors()
+def process_audio(audio, batch_size=8, thread_count=8):
+    global interpreter, input_details, output_details, num_threads, num_batch
+
+    # Initialize the interpreter just once
+    if interpreter is None or num_threads != thread_count or num_batch != batch_size:
+        num_batch = batch_size
+        num_threads = thread_count
+        interpreter = Interpreter(model_path=MODEL_PATH, num_threads=num_threads)
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+
+        interpreter.resize_tensor_input(input_details[0]['index'], [num_batch, 192000])
+        interpreter.allocate_tensors()
 
     prediction : tuple[float, float, str, float] = [] # [(start, end, label, confidence)]
 
@@ -118,7 +130,7 @@ def merge_overlaps_simple(detections: list[tuple[float, float, str, float, dict]
             # Merge them — keep the one with higher confidence
             if det[3] > last[3]:
                 merged[-1] = det
-            else:
+            else:   
                 if abs(det[3] - last[3]) >= FALL_THRESHOLD:
                     merged.append(det)
         else:
@@ -148,5 +160,6 @@ async def process(file: UploadFile):
                 "fullPredictions": pred_percents
             }
             for pred_start, pred_end, label, confidence, pred_percents in merged_segments
+            if label != "None"
         ]
     })

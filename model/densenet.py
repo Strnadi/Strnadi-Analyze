@@ -3,6 +3,11 @@ import sys
 import shutil
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+# Ensure project root is on sys.path so we can import sibling packages like 'layers'
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import time
 import math
 import glob
@@ -16,8 +21,10 @@ import matplotlib.pyplot as plt
 from functools import cache
 from pathlib import Path
 
-from ..layers.global_gem2d import GlobalGeMPool2D
-from ..layers.mel_to_magma import mel_to_magma
+from layers.global_gem2d import GlobalGeMPool2D
+from layers.attentive_stats_pool import AttentiveStatsPool
+from layers.mel_to_magma import mel_to_magma
+from layers.densenet import DenseNet
 
 
 LOCAL_WORKSPACE = '/content'
@@ -187,21 +194,35 @@ def make_model():
     )(inp)
     image = keras.layers.Lambda(mel_to_magma)(spect)
 
-    cnn = keras.applications.DenseNet121(
-        weights="imagenet",
+    # blocks=[6, 12, 12, 8] — roughly half the depth
+    # blocks=[4, 8, 16, 12] — even smaller
+
+    cnn = DenseNet(
+        blocks=[4, 8, 16, 12],
         include_top=False,
-        pooling=None
+        weights=None,
+        pooling=None,
+        # input_tensor=image,
+        # input_shape=(128, 376, 3),
     )
 
+    # cnn = keras.applications.DenseNet121(
+    #     weights="imagenet",
+    #     include_top=False,
+    #     pooling=None
+    # )
+
     x = cnn(image)
-    x = GlobalGeMPool2D()(x)
+    # x = GlobalGeMPool2D()(x)
+
+    x = AttentiveStatsPool()(x)
 
     x = keras.layers.Dense(256, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01))(x)
     x = keras.layers.Dropout(0.3)(x)
     x = keras.layers.Dense(64, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01))(x)
     x = keras.layers.Dropout(0.3)(x)
 
-    outp = keras.layers.Dense(num_classes, activation='softmax')(x)
+    outp = keras.layers.Dense(7, activation='softmax')(x)
     return keras.Model(inputs=inp, outputs=outp)
 
 
