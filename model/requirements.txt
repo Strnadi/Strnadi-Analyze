@@ -4,3 +4,4 @@ librosa
 scikit-learn
 imblearn
 numpy
+matplotlib
