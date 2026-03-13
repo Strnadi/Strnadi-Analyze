@@ -5,5 +5,6 @@ matplotlib
 librosa
 keras
 tensorflow
-sklearn
+scikit-learn
 imblearn
+hdbscan

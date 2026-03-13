@@ -174,10 +174,10 @@ class AttentiveStatsPool1D(keras.layers.Layer):
         # Concatenate mean and standard deviation
         return tf.concat([mu, sigma], axis=-1)
 
-WORKSPACE = '.'
+WORKSPACE = '/workspace'
 
 AUDIO_EXTENSIONS = [".wav", ".mp3", ".flac", ".ogg", ".aiff"]
-DATASET_DIR = os.path.join(WORKSPACE, '_dataset')
+DATASET_DIR = os.path.join(WORKSPACE, 'dataset')
 SAMPLE_RATE, SAMPLE_SECONDS = 48000, 4
 BATCH_SIZE = 32
 
@@ -351,6 +351,7 @@ def make_model():
 
     # Convert to 3-channel for ImageNet weights
     spect = keras.layers.Lambda(mel_to_magma)(spect)
+    # spect = keras.layers.Lambda(add_physics_channels)(spect)
 
     # 3. CNN Feature Extractor (Spatial/Frequency Shapes)
     cnn = keras.applications.DenseNet121(
@@ -386,6 +387,7 @@ def make_model():
     x = keras.layers.Dropout(0.3)(x)
     
     # Final Embedding Layer (e.g., 128 dimensions)
+    # embeddings = keras.layers.Dense(spect.shape[-1], activation=None, name='raw_embedding')(x)
     embeddings = keras.layers.Dense(128, activation=None, name='raw_embedding')(x)
     
     # 8. L2 Normalization (Crucial for Cosine Similarity/Clustering)
@@ -447,6 +449,14 @@ class ContrastiveLearner(keras.Model):
         # Update and return metrics
         self.loss_tracker.update_state(loss)
         return {"loss": self.loss_tracker.result()}
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "encoder": self.encoder,
+            "temperature": self.temperature,
+        })
+        return config
 
 
 base_embedding_model = make_model()
@@ -481,7 +491,7 @@ backup_dir = os.path.join(WORKSPACE, 'training-backups', str(current_time))
 
 history = contrastive_model.fit(
     ds_train,
-    # validation_data=ds_validate,
+    validation_data=ds_validate,
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
     # class_weight=class_weights,
@@ -489,7 +499,7 @@ history = contrastive_model.fit(
     # validation_steps=val_steps,
     callbacks=[
         keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(checkpoint_dir, '{epoch}-{val_f1_score:.4f}-{val_loss:.4f}.keras'),
+            filepath=os.path.join(checkpoint_dir, '{epoch}-{val_loss:.4f}.keras'),
             monitor='val_loss',
             mode='min',
             save_best_only=True,
