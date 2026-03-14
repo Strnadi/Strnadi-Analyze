@@ -1,9 +1,11 @@
 import os
 import sys
 import shutil
-from perch_hoplite.zoo import model_configs
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+# Perch v2.0: load via zoo and embed as a TF-graph layer so weights save with the model.
+from perch_hoplite.zoo import hub as perch_hub
 
 # Ensure project root is on sys.path so we can import sibling packages like 'layers'
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -184,7 +186,122 @@ DATASET_DIR = os.path.join(WORKSPACE, 'dataset')
 SAMPLE_RATE, SAMPLE_SECONDS = 48000, 4
 BATCH_SIZE = 32
 
-foundation_model = model_configs.load_model_by_name('perch_v2')
+# Perch v2.0 expects 32 kHz, 5 s windows → 160000 samples per clip
+PERCH_SAMPLE_RATE = 32000
+PERCH_WINDOW_S = 5.0
+PERCH_AUDIO_LENGTH = int(PERCH_SAMPLE_RATE * PERCH_WINDOW_S)  # 160000
+PERCH_EMBEDDING_DIM = 1536
+
+
+def _frame_audio_tf(audio: tf.Tensor, window_size_s: float, hop_size_s: float, sample_rate: int):
+    """Frame audio along the last axis. audio: (B, T) -> (B, num_frames, frame_length)."""
+    frame_length = int(window_size_s * sample_rate)
+    hop_length = int(hop_size_s * sample_rate)
+    length = tf.shape(audio)[-1]
+    pad_amount = tf.maximum(0, frame_length - length)
+    audio = tf.pad(audio, [[0, 0], [0, pad_amount]])
+    return tf.signal.frame(audio, frame_length, hop_length, pad_end=False)
+
+
+def _normalize_audio_tf(framed_audio: tf.Tensor, target_peak: float):
+    """Normalize framed audio to target_peak (mirrors zoo_interface.normalize_audio)."""
+    if target_peak is None:
+        return framed_audio
+    x = framed_audio - tf.reduce_mean(framed_audio, axis=-1, keepdims=True)
+    peak = tf.reduce_max(tf.abs(x), axis=-1, keepdims=True)
+    x = tf.where(peak > 0, x / peak * target_peak, x)
+    return x
+
+
+class PerchEmbeddingLayer(keras.layers.Layer):
+    """
+    Keras layer that embeds Perch v2.0 inside the model using only TF ops.
+    Perch weights are part of the graph and are saved with the model.
+
+    Save with Perch embedded: model.save('path', save_format='tf').
+    Load: keras.models.load_model('path', custom_objects={'PerchEmbeddingLayer': PerchEmbeddingLayer})
+    """
+
+    def __init__(
+        self,
+        model_path: str | None = None,
+        tfhub_slug: str | None = None,
+        tfhub_version: int | None = None,
+        target_peak: float = 0.25,
+        window_size_s: float = 5.0,
+        hop_size_s: float = 5.0,
+        sample_rate: int = 32000,
+        time_pooling: str = "mean",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        if model_path is None and (tfhub_slug is None or tfhub_version is None):
+            raise ValueError("Provide either model_path or both tfhub_slug and tfhub_version.")
+        self.model_path = model_path
+        self.tfhub_slug = tfhub_slug
+        self.tfhub_version = tfhub_version
+        self.target_peak = target_peak
+        self.window_size_s = window_size_s
+        self.hop_size_s = hop_size_s
+        self.sample_rate = sample_rate
+        self.time_pooling = time_pooling
+        self.embedding_dim = PERCH_EMBEDDING_DIM
+        self.trainable = False
+        self._perch_model = None
+        self._infer_fn = None
+
+    def build(self, input_shape):
+        if self._perch_model is None:
+            if self.model_path:
+                path = self.model_path
+            else:
+                path = perch_hub.resolve(self.tfhub_slug, self.tfhub_version)
+            self._perch_model = tf.saved_model.load(path)
+            self._infer_fn = self._perch_model.signatures["serving_default"]
+        self.built = True
+        super().build(input_shape)
+
+    def call(self, inputs):
+        # inputs: (batch, time)
+        framed = _frame_audio_tf(
+            inputs, self.window_size_s, self.hop_size_s, self.sample_rate
+        )
+        # framed: (B, num_frames, frame_length) -> flatten to (B*num_frames, frame_length)
+        batch_size = tf.shape(framed)[0]
+        num_frames = tf.shape(framed)[1]
+        frame_length = tf.shape(framed)[2]
+        rebatched = tf.reshape(framed, [-1, frame_length])
+        normalized = _normalize_audio_tf(rebatched, self.target_peak)
+        # Perch v2 signature: inputs -> dict with 'embedding' (N, 1536) or (N, 1, 1536)
+        outputs = self._infer_fn(inputs=normalized)
+        emb = outputs["embedding"]
+        # Flatten to (N, D) then reshape to (B, num_frames, 1, D)
+        emb = tf.reshape(emb, [-1, self.embedding_dim])
+        emb = tf.reshape(emb, [batch_size, num_frames, 1, self.embedding_dim])
+        # Time/channel pool to (B, embedding_dim)
+        if self.time_pooling == "mean":
+            emb = tf.reduce_mean(emb, axis=[1, 2])
+        elif self.time_pooling == "max":
+            emb = tf.reduce_max(emb, axis=[1, 2])
+        elif self.time_pooling == "first":
+            emb = emb[:, 0, 0, :]
+        else:
+            emb = tf.reduce_mean(emb, axis=[1, 2])
+        return emb
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "model_path": self.model_path,
+            "tfhub_slug": self.tfhub_slug,
+            "tfhub_version": self.tfhub_version,
+            "target_peak": self.target_peak,
+            "window_size_s": self.window_size_s,
+            "hop_size_s": self.hop_size_s,
+            "sample_rate": self.sample_rate,
+            "time_pooling": self.time_pooling,
+        })
+        return config
 
 
 ## @cache
@@ -231,11 +348,12 @@ def audio_generator(files, labels, class_names, shuffle):
         # One-hot encode the label for loss calculation
         one_hot = np.zeros(num_classes)
         one_hot[label] = 1
-        audio = load_and_normalize_audio(file_path, target_sr=32000, target_duration=5)
+        audio = load_and_normalize_audio(
+            file_path, target_sr=PERCH_SAMPLE_RATE, target_duration=PERCH_WINDOW_S
+        )
 
         if audio is not None:
-            # Yield ((audio_input, integer_label_input), one_hot_label_for_loss)
-            # yield ((audio, label), one_hot)
+            # Yield raw audio so Perch is embedded inside the Keras model (PerchEmbeddingLayer).
             yield audio, one_hot
 
 
@@ -300,11 +418,9 @@ def load_data(directory, validation_split=0.3, batch_size=BATCH_SIZE, shuffle=Tr
     print(f"Found {len(audio_files)} audio files in {len(class_names)} classes")
     print(f"Training on {len(train_files)} files, validating on {len(val_files)} files, testing on {len(test_files)} files")
 
-    # Define output signature for the generator:
-    # ( (audio_input_spec, integer_label_input_spec), one_hot_label_target_spec )
     output_signature = (
-        tf.TensorSpec(shape=(160000,), dtype=tf.float32),
-        tf.TensorSpec(shape=(len(class_names),), dtype=tf.float32)
+        tf.TensorSpec(shape=(PERCH_AUDIO_LENGTH,), dtype=tf.float32),
+        tf.TensorSpec(shape=(len(class_names),), dtype=tf.float32),
     )
 
     # Create TensorFlow datasets using generators
@@ -334,29 +450,17 @@ num_classes = len(class_names)
 # class_weights = {k: v * inv_max for k,v in class_weights.items()}
 print("Class weights:", class_weights)
 
-import tensorflow_hub as hub
-
-# audio_input = tf.keras.layers.Input(shape=(160000,), dtype=tf.float32, name='audio_input')
-
-print("Loading Perch v2 backbone...")
-model_url = 'https://www.kaggle.com/models/google/bird-vocalization-classifier/tensorFlow2/perch_v2/2'
-model_path = hub.resolve(model_url)
-
-perch_layer = keras.layers.TFSMLayer(
-    model_path,
-    trainable=False,
-    call_endpoint='serving_default'
-)
-
 def make_model():
-    inp = keras.Input(shape=(160000,))
-
-    outputs = perch_layer(inp)
-    embedding = outputs['embedding']
-
-    x = keras.layers.Dense(512, activation='gelu')(embedding)
+    # Perch v2.0 embedded in the TF graph; save with model.save('path', save_format='tf').
+    inp = keras.Input(shape=(PERCH_AUDIO_LENGTH,), dtype=tf.float32)
+    x = PerchEmbeddingLayer(
+        tfhub_slug=perch_hub.PERCH_V2_SLUG,
+        tfhub_version=2,
+        time_pooling="mean",
+    )(inp)
+    x = keras.layers.Dense(512, activation="gelu")(x)
     x = keras.layers.Dropout(0.3)(x)
-    x = keras.layers.Dense(num_classes, activation='softmax')(x)
+    x = keras.layers.Dense(num_classes, activation="softmax")(x)
     return keras.Model(inputs=inp, outputs=x)
 
 model = make_model()
@@ -420,25 +524,10 @@ history = model.fit(
     ]
 )
 
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
-
-# (Optional) Shrink it even further using FP16 Quantization
-converter.optimizations = [tf.lite.Optimize.DEFAULT]
-converter.target_spec.supported_types = [tf.float16]
-
-# 5. Compile and save
-tflite_model = converter.convert()
-
-with open('perch_v2_based.tflite', 'wb') as f:
-    f.write(tflite_model)
-
-print("Perch based TFLite model successfully saved!")
-
-
 true_labels, pred_labels = [], []
 
-for embeddings, one_hot in ds_validate:
-    pred = model.predict(embeddings, verbose=0)
+for audio_batch, one_hot in ds_validate:
+    pred = model.predict(audio_batch, verbose=0)
     # argmax over classes (axis=1), not over flattened batch
     one_hot_np = one_hot.numpy() if hasattr(one_hot, 'numpy') else np.array(one_hot)
     pred_indices = np.argmax(pred, axis=1)
