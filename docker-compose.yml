@@ -12,4 +12,12 @@ services:
       - MODEL_LABELS=BC,BE,BhBl,BlBh,None,Unfinished,XB
 
     ports:
-      - "9197:8000"
+      - "8000:8000"
+
+    networks:
+      - strnadi-ai
+  
+networks:
+  strnadi-ai:
+    external: true
+    name: strnadi-ai

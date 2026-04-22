@@ -151,7 +151,7 @@ async def process(file: UploadFile):
     logger.info(f"Processing took {end - start:.2f} seconds")
 
     return JSONResponse({
-        "representantId": "Deprecated, use 'isRepresentant' field in 'segments'. Multiple representants are allowed", # todo: make backend aware of this API change
+        "representantId": 0 if len(merged_segments) > 0 else -1,  #"Deprecated, use 'isRepresentant' field in 'segments'. Multiple representants are allowed",
         "segments": [
             {
                 "interval": [pred_start, pred_end],
