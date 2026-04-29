@@ -150,16 +150,20 @@ async def process(file: UploadFile):
 
     logger.info(f"Processing took {end - start:.2f} seconds")
 
+    best_representant_id = max(enumerate(merged_segments), key=lambda x: x[1][3])[0] if len(merged_segments) > 0 else -1
+    if merged_segments[best_representant_id][2] in ("Unfinished", "None"):
+        best_representant_id = -1
+    
     return JSONResponse({
-        "representantId": 0 if len(merged_segments) > 0 else -1,  #"Deprecated, use 'isRepresentant' field in 'segments'. Multiple representants are allowed",
+        "representantId": best_representant_id, # deprecated, kept for now
         "segments": [
             {
                 "interval": [pred_start, pred_end],
                 "label": label,
-                "isRepresentant": confidence >= MIN_CONFIDENCE_PERCENT,
+                "isRepresentant": i == best_representant_id,
                 "fullPredictions": pred_percents
             }
-            for pred_start, pred_end, label, confidence, pred_percents in merged_segments
+            for i, (pred_start, pred_end, label, confidence, pred_percents) in enumerate(merged_segments)
             if label != "None"
         ]
     })
