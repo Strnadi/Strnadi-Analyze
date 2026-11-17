@@ -29,16 +29,23 @@ def load_audio(file: str | io.BytesIO, target_sr=SAMPLE_RATE):
     return audio, sr
 
 def chunk_audio(audio, clip_length=4.0, step=0.5, target_sr=SAMPLE_RATE):
-    for i in range(0, len(audio), int(step * target_sr)):
-        chunk = audio[i:i + int(clip_length * target_sr)]
+    window_samples = int(clip_length * target_sr)
+    step_samples = int(step * target_sr)
+    total = len(audio)
+    if not total:
+        return
+    if total < window_samples:
+        yield np.pad(audio, (0, window_samples - total)), 0.0, total / target_sr
+        return
 
-        if len(chunk) < int(clip_length * target_sr):
-            padding = int(clip_length * target_sr) - len(chunk)
-            chunk = np.pad(chunk, (0, padding), 'constant')
+    last_start = total - window_samples
+    for start in range(0, last_start + 1, step_samples):
+        end = start + window_samples
+        yield audio[start:end], start / target_sr, end / target_sr
 
-        start_s = i / target_sr
-        end_s = start_s + clip_length
-        yield chunk, start_s, end_s
+    # Cover a final fractional step with a full window ending at the last sample.
+    if last_start % step_samples:
+        yield audio[last_start:], last_start / target_sr, total / target_sr
 
 num_threads = None
 num_batch = None
@@ -151,7 +158,7 @@ async def process(file: UploadFile):
     logger.info(f"Processing took {end - start:.2f} seconds")
 
     best_representant_id = max(enumerate(merged_segments), key=lambda x: x[1][3])[0] if len(merged_segments) > 0 else -1
-    if merged_segments[best_representant_id][2] in ("Unfinished", "None"):
+    if best_representant_id >= 0 and merged_segments[best_representant_id][2] in ("Unfinished", "None"):
         best_representant_id = -1
     
     return JSONResponse({
