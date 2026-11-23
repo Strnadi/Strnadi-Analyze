@@ -1,6 +1,20 @@
-ai-edge-litert
+# training / evaluation / data preparation (CPU build of torch is enough: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu)
+torch
+torchvision
+timm
 numpy
+scipy
+pandas
+pyarrow
+scikit-learn
+matplotlib
 librosa
-fastapi
-uvicorn
-python-multipart
+soundfile
+imageio-ffmpeg
+onnx
+onnxruntime
+openpyxl
+umap-learn
+# optional, only for specific processing scripts:
+#   tensorflow-cpu + kagglehub   processing/extract_foundation_emb.py (frozen Perch 2.0 embeddings, TF SavedModel)
+#   ai-edge-litert               processing/run_birdnet_corpus.py, jcu_pipeline.py (BirdNET 2.4), evaluation of the old .tflite model

@@ -184,3 +184,9 @@ cython_debug/
 .DS_Store
 
 *.tflite
+
+# local scratch / build products
+.smoke_ws/
+*.onnx
+vastai-serverless/benchmark_samples.py
+.claude/worktrees/

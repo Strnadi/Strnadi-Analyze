@@ -1,8 +1,0 @@
-keras
-tensorflow[and-cuda]
-librosa
-scikit-learn
-imblearn
-numpy
-matplotlib
-tensorboard

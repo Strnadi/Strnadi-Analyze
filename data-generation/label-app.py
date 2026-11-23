@@ -12,7 +12,7 @@ import librosa.display
 import matplotlib
 from flask import Flask, render_template_string, send_file, request, redirect, url_for, session, make_response, abort, g
 from threading import Lock
-from ai_edge_litert.interpreter import Interpreter
+import onnxruntime
 import logging
 
 matplotlib.use("Agg")
@@ -194,10 +194,27 @@ def format_prob(prob: float) -> str:
     return f"{prob * 100:.2f}%"
 
 
-interpreter = Interpreter(model_path="good-model-1.tflite", num_threads=8)
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
-interpreter.allocate_tensors()
+# Pre-label suggestions come from an ONNX model exported with `python -m serving.export_onnx <run> model.onnx`
+# (waveform (B, 128000) @ 32 kHz -> probs). The previous TFLite call fed the raw clip and crashed on any clip
+# that was not exactly 4 s at 48 kHz, or that failed to load.
+MODEL_SR, MODEL_SAMPLES = 32000, 128000
+session = onnxruntime.InferenceSession(os.environ.get("MODEL_PATH", "model.onnx"), providers=["CPUExecutionProvider"])
+
+
+def predict_clip(filepath):
+    """class probabilities for the middle 4 s of a clip (short clips are padded with low-level noise)"""
+    try:
+        y, _ = librosa.load(filepath, sr=MODEL_SR, mono=True)
+    except Exception as e:
+        print(f"Error loading {filepath}: {e}")
+        return {l: 0.0 for l in MODEL_LABELS}
+    if len(y) >= MODEL_SAMPLES:
+        i0 = (len(y) - MODEL_SAMPLES) // 2; y = y[i0:i0 + MODEL_SAMPLES]
+    else:
+        pad = np.random.default_rng(0).normal(0, float(np.std(y)) * 0.05 + 1e-5, MODEL_SAMPLES - len(y))
+        y = np.concatenate([y, pad])
+    probs = session.run(["probs"], {"waveform": y[None].astype(np.float32)})[0][0]
+    return dict(zip(MODEL_LABELS, map(float, probs)))
 
 # ---------- routes ----------
 @app.route("/")
@@ -231,14 +248,7 @@ def index():
 
     filepath, original_label = row
 
-    audio = load_and_normalize_audio(filepath)
-    # print(audio, audio.shape)
-
-    interpreter.set_tensor(input_details[0]['index'], np.array([audio]))
-    interpreter.invoke()
-
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-    predictions = dict(zip(MODEL_LABELS, map(float, output_data[0])))
+    predictions = predict_clip(filepath)
 
     # print(predictions)
 
@@ -277,7 +287,7 @@ def spectrogram(filepath):
     if not os.path.exists(filepath):
         return "File not found", 404
 
-    y, sr = librosa.load(filepath, sr=48000, mono=False)
+    y, sr = librosa.load(filepath, sr=48000, mono=True)   # mono: a stereo file gave a 3-D spectrogram and specshow failed
     fig, ax = plt.subplots(figsize=(6, 3))
     S = librosa.feature.melspectrogram(y=y, sr=sr, fmin=2500, fmax=12000)
     librosa.display.specshow(librosa.power_to_db(S, ref=np.max), sr=sr, ax=ax, cmap="magma")

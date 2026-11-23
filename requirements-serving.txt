@@ -1,0 +1,7 @@
+onnxruntime
+numpy
+scipy
+librosa
+fastapi
+uvicorn
+python-multipart

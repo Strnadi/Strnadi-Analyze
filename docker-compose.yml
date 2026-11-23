@@ -4,19 +4,21 @@ services:
     build:
       context: .
       args:
-        - HOST_MODEL_PATH=good-model-2.tflite
+        # ONNX file exported with: python -m serving.export_onnx <run_dir> model.onnx
+        - HOST_MODEL_PATH=model.onnx
 
     environment:
-      - MIN_CONFIDENCE_PERCENT=70
+      - MIN_CONFIDENCE_PERCENT=60
       - MIN_REPRESENTANT_CONFIDENCE_PERCENT=65
       - MODEL_LABELS=BC,BE,BhBl,BlBh,None,Unfinished,XB
+      - THREADS=4
 
     ports:
       - "8000:8000"
 
     networks:
       - strnadi-ai
-  
+
 networks:
   strnadi-ai:
     external: true
