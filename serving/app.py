@@ -13,6 +13,7 @@ by `max`), a recording with no detections raised IndexError, and intervals were 
 songs. Environment: MODEL_PATH, MODEL_LABELS, MIN_CONFIDENCE_PERCENT, MIN_REPRESENTANT_CONFIDENCE_PERCENT,
 THREADS, MODEL_LOG_FILE (optional second log target, tailed by the Vast.ai worker).
 """
+
 import base64
 import io
 import logging
@@ -30,7 +31,11 @@ handlers = [logging.StreamHandler()]
 if os.environ.get('MODEL_LOG_FILE'):
     os.makedirs(os.path.dirname(os.environ['MODEL_LOG_FILE']), exist_ok=True)
     handlers.append(logging.FileHandler(os.environ['MODEL_LOG_FILE']))
-logging.basicConfig(format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', level=logging.INFO, handlers=handlers)
+logging.basicConfig(
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    level=logging.INFO,
+    handlers=handlers,
+)
 log = logging.getLogger('strnadi')
 
 app = FastAPI()
@@ -45,7 +50,8 @@ def classifier():
             os.environ.get('MODEL_LABELS', 'BC,BE,BhBl,BlBh,None,Unfinished,XB').split(','),
             threads=int(os.environ.get('THREADS', 4)),
             min_confidence=float(os.environ.get('MIN_CONFIDENCE_PERCENT', 60)) / 100,
-            min_representant=float(os.environ.get('MIN_REPRESENTANT_CONFIDENCE_PERCENT', 65)) / 100)
+            min_representant=float(os.environ.get('MIN_REPRESENTANT_CONFIDENCE_PERCENT', 65)) / 100,
+        )
     return _classifier
 
 
@@ -60,7 +66,8 @@ def run(data: bytes):
         y, _ = librosa.load(io.BytesIO(data), sr=SR, mono=True)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f'could not decode audio: {e}')
-    t = time.time(); out = classifier().classify(y)
+    t = time.time()
+    out = classifier().classify(y)
     log.info(f'{len(y) / SR:.1f} s audio, {len(out["segments"])} segments, {time.time() - t:.2f} s')
     return JSONResponse(out)
 

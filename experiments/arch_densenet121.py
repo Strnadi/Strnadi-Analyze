@@ -1,10 +1,64 @@
-from .recipes import R7
+# %% [markdown]
+# # arch_densenet121
+#
+# Control: the production backbone (ImageNet DenseNet121, 8.2 M) with the new data, losses and
+# temporal head.
+#
+# **Question.** Is the production model weak because of its data and training protocol, or because
+# of the architecture?
+#
+# **Status:** queued (from the research session). Not finished. ~5x the training cost per step of
+# StrnadNet on CPU. See legacy_densenet121.py for the original design (patch pooling instead of a
+# temporal head).
+#
+# Run from the repository root with `python -m experiments.arch_densenet121`, or step through the
+# cells in an editor / Jupyter whose working directory is the repository root. Training writes to
+# `$STRNADI_WS/runs/arch_densenet121/`.
 
-EXPERIMENT = dict(
-    R7, model='timm_temporal', model_kw=dict(backbone='densenet121', head='factorized'), backbone_lr_mult=0.1, folds=[0, 1, 2],
-    description='Control: the production backbone (ImageNet DenseNet121, 8.2 M) with the new data, losses and temporal head.',
-    hypothesis='Is the production model weak because of its data and training protocol, or because of the architecture?',
-    origin='research-session', status='queued',
-    result='Not finished. ~5x the training cost per step of StrnadNet on CPU. See legacy_densenet121.py for the original design '
-           '(patch pooling instead of a temporal head).',
+# %% Imports
+from evaluation.report import plot_error_examples, plot_run, summarize_run
+from model.timm_temporal import TimmTemporal
+from training.fit import cross_validate
+from training.settings import TrainSettings
+
+# %% Settings (everything not listed keeps its default from training/settings.py)
+RUN = 'arch_densenet121'
+
+settings = TrainSettings(
+    # data
+    labelled_table='data/orig_aligned.csv',
+    extra_tables={
+        'data/weak_v3.csv': 0.35,
+        'data/cf_v4.csv': 0.08,
+        'data/vizann_v1.csv': 0.07,
+    },
+    noise_bank='data/noise_bank_audiomoth.npy',
+    eval_window='start',
+    # protocol
+    folds=[0, 1, 2],
+    checkpoint_rule='inner_argmax',
+    # optimisation
+    epochs=25,
+    samples_per_epoch=6144,
+    batch_size=48,
+    learning_rate=0.002,
+    backbone_lr_factor=0.1,
+    # waveform augmentation
+    noise_probability=0.5,
+    snr_reference='band',
+    splice_probability=0.3,
 )
+
+
+# %% Model
+def make_model():
+    return TimmTemporal(backbone='densenet121', head='factorized')
+
+
+# %% Train: one model per fold (recording-grouped cross-validation)
+cross_validate(RUN, make_model, settings)
+
+# %% Evaluate on the held-out clips of every fold
+summarize_run(RUN)
+plot_run(RUN)
+plot_error_examples(RUN)

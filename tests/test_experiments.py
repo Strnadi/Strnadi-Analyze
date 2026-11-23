@@ -1,44 +1,55 @@
-"""Every experiment file loads, has the documentation fields, uses only known configuration keys and names a
-registered model that can be built with its arguments (models that would download weights are built without
-them; models needing external code are only checked for their registry entry).
+"""Every experiment script runs from top to bottom in dry-run mode.
 
     python -m tests.test_experiments
-"""
-import torch
-from experiments.run import all_experiments, load
-from model import MODELS, build_model
-from training.defaults import make_config
 
-NEEDS_EXTERNAL = {'efficientat_temporal'}
+With STRNADI_DRY_RUN=1 the training functions build the experiment's model, push one random batch
+through it and return, and the evaluation functions do nothing. That executes every line of every
+script (imports, settings, `make_model`) without data, downloads or training.
+
+Experiments whose model needs something external are only checked for syntax:
+pretrained weights (torchvision / timm), the Perch port, or the EfficientAT clone.
+"""
+
+import ast
+import glob
+import os
+import runpy
+
+os.environ['STRNADI_DRY_RUN'] = '1'
+
+import torch  # noqa: E402
+
+EXPERIMENT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'experiments'
+)
+
+#: Text in a script that means "building this model needs a download or external code".
+NEEDS_EXTERNAL = ('pretrained=True', 'precomputed=False', 'EfficientATTemporal', 'TimmTemporal(')
+#: Models that load pretrained weights by default.
+PRETRAINED_BY_DEFAULT = ('DenseNet121AttnPool()', 'MobileNetV3Delta()')
 
 
 def test_experiments():
-    names = all_experiments(); assert len(names) > 40
-    for stem in names:
-        e = load(stem)
-        for field in ('description', 'hypothesis', 'origin', 'status', 'result'):
-            assert e.get(field), f'{stem}: missing {field}'
-        assert e['origin'] in ('legacy-repo', 'research-session', 'review-fork', 'review-base'), stem
-        assert e['status'] in ('done', 'running', 'queued', 'proposed'), stem
-        if e.get('runner', 'cv') != 'cv':
-            assert '{name}' in e['args'], stem; continue
-        cfg = make_config(e)
-        assert cfg['model'] in MODELS, f'{stem}: unknown model {cfg["model"]}'
-        assert set(cfg['pool_share']) <= {p.split('/')[-1].replace('.csv', '') for p in cfg['extra']}, f'{stem}: pool_share names a table not in extra'
-        if cfg['model'] in NEEDS_EXTERNAL:
+    scripts = sorted(glob.glob(f'{EXPERIMENT_DIR}/*.py'))
+    scripts = [path for path in scripts if not path.endswith('__init__.py')]
+    assert len(scripts) > 40
+
+    executed = 0
+    for path in scripts:
+        with open(path) as file:
+            source = file.read()
+        name = os.path.basename(path)
+
+        ast.parse(source)
+        assert source.startswith('# %% [markdown]'), f'{name}: no markdown header'
+        assert '**Question.**' in source and '**Status:**' in source, f'{name}: incomplete header'
+
+        if any(marker in source for marker in NEEDS_EXTERNAL + PRETRAINED_BY_DEFAULT):
             continue
-        kw = dict(cfg['model_kw'])
-        if cfg['model'] in ('timm_temporal', 'densenet121_attnpool', 'mobilenetv3_delta'):
-            kw['pretrained'] = False
-        if cfg['model'].startswith('perch') and not kw.get('precomputed', True):
-            continue                                              # would download the Perch port
-        m = build_model(cfg['model'], n_classes=7, **kw)
-        if cfg['inputs'] == 'wave':
-            n = int(cfg['win'] * 32000)
-            assert m.eval()(torch.randn(2, n) * 0.1)['logits'].shape == (2, 7), stem
-        if cfg['w_bag'] > 0 or any('|' in '' for _ in ()):
-            assert kw.get('head') == 'factorized', f'{stem}: the bag loss needs the factorised head'
-    print(len(names), 'experiments ok')
+        runpy.run_path(path, run_name='__main__')
+        executed += 1
+
+    print(f'{len(scripts)} experiment scripts parsed, {executed} executed in dry-run mode')
 
 
 if __name__ == '__main__':

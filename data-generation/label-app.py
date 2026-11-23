@@ -10,24 +10,35 @@ import wave
 import librosa
 import librosa.display
 import matplotlib
-from flask import Flask, render_template_string, send_file, request, redirect, url_for, session, make_response, abort, g
+from flask import (
+    Flask,
+    render_template_string,
+    send_file,
+    request,
+    redirect,
+    url_for,
+    session,
+    make_response,
+    abort,
+    g,
+)
 from threading import Lock
 import onnxruntime
 import logging
 
-matplotlib.use("Agg")
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 app = Flask(__name__, static_folder='')
 app.logger.setLevel(logging.INFO)
 
 
-DATABASE_PATH = os.environ.get("DATABASE_PATH", "database.db")
-MODEL_LABELS = ["BC", "BE", "BhBl", "BlBh", "None", "Unfinished", "XB"]
+DATABASE_PATH = os.environ.get('DATABASE_PATH', 'database.db')
+MODEL_LABELS = ['BC', 'BE', 'BhBl', 'BlBh', 'None', 'Unfinished', 'XB']
 
 
 def get_db():
-    db = g.get("_database")
+    db = g.get('_database')
     if db is None:
         db = g._database = sqlite3.connect(DATABASE_PATH)
     return db
@@ -35,12 +46,13 @@ def get_db():
 
 @app.teardown_appcontext
 def close_db(exception):
-    db = g.pop("_database", None)
+    db = g.pop('_database', None)
     if db is not None:
         db.close()
 
+
 # Configure a dedicated access logger (file or stdout)
-access_logger = logging.getLogger("access")
+access_logger = logging.getLogger('access')
 access_logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 # formatter may reference attributes provided via logging.extra
@@ -49,16 +61,18 @@ handler.setFormatter(logging.Formatter(fmt))
 access_logger.addHandler(handler)
 
 # Avoid duplicate lines from Werkzeug's own logger
-logging.getLogger("werkzeug").setLevel(logging.ERROR)
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
 
 @app.before_request
 def start_timer():
     g.start_time = time.perf_counter()
 
+
 @app.after_request
 def log_request(response):
     # compute duration
-    start = getattr(g, "start_time", None)
+    start = getattr(g, 'start_time', None)
     duration_ms = int((time.perf_counter() - start) * 1000) if start else -1
 
     # content length (dash if unknown)
@@ -66,26 +80,27 @@ def log_request(response):
         content_length = response.calculate_content_length()
     except Exception:
         content_length = None
-    content_length = content_length if content_length is not None else "-"
+    content_length = content_length if content_length is not None else '-'
 
     # supply fields to formatter via extra
     access_logger.info(
-        "",  # message can be empty; formatter will use extra fields
+        '',  # message can be empty; formatter will use extra fields
         extra={
-            "remote_addr": request.remote_addr or "-",
-            "user": getattr(request, "remote_user", "-") or "-",
-            "method": request.method,
-            "path": request.full_path if request.query_string else request.path,
-            "protocol": request.environ.get("SERVER_PROTOCOL", "-"),
-            "status": response.status_code,
-            "content_length": content_length,
-            "duration_ms": duration_ms,
+            'remote_addr': request.remote_addr or '-',
+            'user': getattr(request, 'remote_user', '-') or '-',
+            'method': request.method,
+            'path': request.full_path if request.query_string else request.path,
+            'protocol': request.environ.get('SERVER_PROTOCOL', '-'),
+            'status': response.status_code,
+            'content_length': content_length,
+            'duration_ms': duration_ms,
         },
     )
 
     # optional: expose timing header for clients
-    response.headers["X-Response-Time"] = f"{duration_ms}ms"
+    response.headers['X-Response-Time'] = f'{duration_ms}ms'
     return response
+
 
 def init_db():
     db = get_db()
@@ -125,7 +140,7 @@ def init_db():
 with app.app_context():
     init_db()
 
-app.secret_key = os.environ.get("FLASK_SECRET", "dev_secret_change_me")
+app.secret_key = os.environ.get('FLASK_SECRET', 'dev_secret_change_me')
 
 
 def db_cursor():
@@ -136,11 +151,11 @@ def get_session_id():
     db = get_db()
     cur = db.cursor()
 
-    sid = session.get("sid")
+    sid = session.get('sid')
     if not sid:
-        cur.execute("INSERT INTO sessions DEFAULT VALUES RETURNING session_id")
+        cur.execute('INSERT INTO sessions DEFAULT VALUES RETURNING session_id')
         sid = cur.fetchone()[0]
-        session["sid"] = sid
+        session['sid'] = sid
         db.commit()
 
     return sid
@@ -152,15 +167,16 @@ def get_all_labels():
 
 def choose_class(label, curr_label):
     if label == curr_label:
-        return "btn-current"
+        return 'btn-current'
 
-    if label == "None":
-        return "btn-none"
+    if label == 'None':
+        return 'btn-none'
 
-    if label == "Unfinished":
-        return "btn-unfinished"
+    if label == 'Unfinished':
+        return 'btn-unfinished'
 
-    return "btn-label"
+    return 'btn-label'
+
 
 def load_and_normalize_audio(file_path):
     try:
@@ -176,11 +192,13 @@ def load_and_normalize_audio(file_path):
         return audio
 
     except Exception as e:
-        print(f"Error loading {file_path}: {e}")
+        print(f'Error loading {file_path}: {e}')
         return None
 
+
 def tocsv(predictions: dict) -> str:
-    return ",".join(f"{k}={v:.2f}%" for k, v in predictions.items())
+    return ','.join(f'{k}={v:.2f}%' for k, v in predictions.items())
+
 
 def get_top_prediction(predictions: dict) -> tuple:
     """Returns (label, probability) of the top prediction"""
@@ -189,16 +207,19 @@ def get_top_prediction(predictions: dict) -> tuple:
     top_label = max(predictions, key=predictions.get)
     return (top_label, predictions[top_label])
 
+
 def format_prob(prob: float) -> str:
     """Format probability as percentage string"""
-    return f"{prob * 100:.2f}%"
+    return f'{prob * 100:.2f}%'
 
 
 # Pre-label suggestions come from an ONNX model exported with `python -m serving.export_onnx <run> model.onnx`
 # (waveform (B, 128000) @ 32 kHz -> probs). The previous TFLite call fed the raw clip and crashed on any clip
 # that was not exactly 4 s at 48 kHz, or that failed to load.
 MODEL_SR, MODEL_SAMPLES = 32000, 128000
-session = onnxruntime.InferenceSession(os.environ.get("MODEL_PATH", "model.onnx"), providers=["CPUExecutionProvider"])
+session = onnxruntime.InferenceSession(
+    os.environ.get('MODEL_PATH', 'model.onnx'), providers=['CPUExecutionProvider']
+)
 
 
 def predict_clip(filepath):
@@ -206,20 +227,24 @@ def predict_clip(filepath):
     try:
         y, _ = librosa.load(filepath, sr=MODEL_SR, mono=True)
     except Exception as e:
-        print(f"Error loading {filepath}: {e}")
+        print(f'Error loading {filepath}: {e}')
         return {l: 0.0 for l in MODEL_LABELS}
     if len(y) >= MODEL_SAMPLES:
-        i0 = (len(y) - MODEL_SAMPLES) // 2; y = y[i0:i0 + MODEL_SAMPLES]
+        i0 = (len(y) - MODEL_SAMPLES) // 2
+        y = y[i0 : i0 + MODEL_SAMPLES]
     else:
-        pad = np.random.default_rng(0).normal(0, float(np.std(y)) * 0.05 + 1e-5, MODEL_SAMPLES - len(y))
+        pad = np.random.default_rng(0).normal(
+            0, float(np.std(y)) * 0.05 + 1e-5, MODEL_SAMPLES - len(y)
+        )
         y = np.concatenate([y, pad])
-    probs = session.run(["probs"], {"waveform": y[None].astype(np.float32)})[0][0]
+    probs = session.run(['probs'], {'waveform': y[None].astype(np.float32)})[0][0]
     return dict(zip(MODEL_LABELS, map(float, probs)))
 
+
 # ---------- routes ----------
-@app.route("/")
+@app.route('/')
 def index():
-    requested_file = request.args.get("file")
+    requested_file = request.args.get('file')
 
     cur = db_cursor()
 
@@ -229,22 +254,22 @@ def index():
 
     if requested_file:
         cur.execute(
-            "SELECT filepath, original_label FROM labels WHERE filepath = ? AND (locked_until IS NULL OR locked_until < ? OR (locked_until >= ? AND locked_for = ?)) LIMIT 1",
-            (requested_file, current_time, current_time, session_id)
+            'SELECT filepath, original_label FROM labels WHERE filepath = ? AND (locked_until IS NULL OR locked_until < ? OR (locked_until >= ? AND locked_for = ?)) LIMIT 1',
+            (requested_file, current_time, current_time, session_id),
         )
 
         row = cur.fetchone()
 
     if not requested_file or (requested_file and not row):
         cur.execute(
-            "SELECT filepath, original_label FROM labels WHERE user_label IS NULL AND (locked_until IS NULL OR locked_until < ? OR (locked_until >= ? AND locked_for = ?)) ORDER BY RANDOM() LIMIT 1",
-            (current_time, current_time, session_id)
+            'SELECT filepath, original_label FROM labels WHERE user_label IS NULL AND (locked_until IS NULL OR locked_until < ? OR (locked_until >= ? AND locked_for = ?)) ORDER BY RANDOM() LIMIT 1',
+            (current_time, current_time, session_id),
         )
 
         row = cur.fetchone()
 
     if not row:
-        return "No files left to label! 🎉"
+        return 'No files left to label! 🎉'
 
     filepath, original_label = row
 
@@ -252,20 +277,23 @@ def index():
 
     # print(predictions)
 
-    cur.execute("SELECT COUNT(*) FROM undo_stack WHERE session_id = ?", (session_id,))
+    cur.execute('SELECT COUNT(*) FROM undo_stack WHERE session_id = ?', (session_id,))
     undo_count = cur.fetchone()[0]
 
-    cur.execute("""
+    cur.execute(
+        """
         UPDATE labels
         SET locked_until = ?,
             locked_for = ?
         WHERE filepath = ?
-        """, (current_time + lock_duration, session_id, filepath))
+        """,
+        (current_time + lock_duration, session_id, filepath),
+    )
 
     get_db().commit()
 
     top_label, top_prob = get_top_prediction(predictions)
-    
+
     return render_template_string(
         TEMPLATE,
         filepath=filepath,
@@ -278,31 +306,33 @@ def index():
         tocsv=tocsv,
         format_prob=format_prob,
         top_prediction=top_label,
-        top_prob=top_prob
+        top_prob=top_prob,
     )
 
 
-@app.route("/spectrogram/<path:filepath>")
+@app.route('/spectrogram/<path:filepath>')
 def spectrogram(filepath):
     if not os.path.exists(filepath):
-        return "File not found", 404
+        return 'File not found', 404
 
-    y, sr = librosa.load(filepath, sr=48000, mono=True)   # mono: a stereo file gave a 3-D spectrogram and specshow failed
+    y, sr = librosa.load(
+        filepath, sr=48000, mono=True
+    )  # mono: a stereo file gave a 3-D spectrogram and specshow failed
     fig, ax = plt.subplots(figsize=(6, 3))
     S = librosa.feature.melspectrogram(y=y, sr=sr, fmin=2500, fmax=12000)
-    librosa.display.specshow(librosa.power_to_db(S, ref=np.max), sr=sr, ax=ax, cmap="magma")
+    librosa.display.specshow(librosa.power_to_db(S, ref=np.max), sr=sr, ax=ax, cmap='magma')
     ax.axis('off')
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", bbox_inches='tight', pad_inches=0)
+    plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
     plt.close(fig)
     buf.seek(0)
     return send_file(buf, mimetype='image/png')
 
 
-@app.route("/label", methods=["POST"])
+@app.route('/label', methods=['POST'])
 def label_file():
-    filepath = request.form["filepath"]
-    new_label = request.form["label"]
+    filepath = request.form['filepath']
+    new_label = request.form['label']
     sid = get_session_id()
     cur = db_cursor()
 
@@ -313,54 +343,60 @@ def label_file():
     #     # File is already labeled, so just return to index page (silent fail)
     #     return redirect(url_for("index"))
 
-    cur.execute("SELECT locked_until, locked_for FROM labels WHERE filepath = ?", (filepath,))
+    cur.execute('SELECT locked_until, locked_for FROM labels WHERE filepath = ?', (filepath,))
     row = cur.fetchone()
     if row:
         locked_until, locked_for = row
         current_time = int(time.time())
         if locked_until and locked_until >= current_time and locked_for != sid:
             # File is locked by another session, so just return to index page (silent fail)
-            return redirect(url_for("index"))
+            return redirect(url_for('index'))
 
-    cur.execute("""
+    cur.execute(
+        """
         UPDATE labels
         SET user_label = ?,
             model_labels = ?,
             timestamp = ?
         WHERE filepath = ?
-        """, (new_label, request.form.get("model_labels"), int(time.time()), filepath))
+        """,
+        (new_label, request.form.get('model_labels'), int(time.time()), filepath),
+    )
 
-    cur.execute("INSERT INTO undo_stack (session_id, filepath, timestamp) VALUES (?, ?, ?)", (sid, filepath, int(time.time())))
+    cur.execute(
+        'INSERT INTO undo_stack (session_id, filepath, timestamp) VALUES (?, ?, ?)',
+        (sid, filepath, int(time.time())),
+    )
     get_db().commit()
-    return redirect(url_for("index"))
+    return redirect(url_for('index'))
 
 
-@app.route("/undo", methods=["POST"])
+@app.route('/undo', methods=['POST'])
 def undo():
     sid = get_session_id()
 
     cur = db_cursor()
     cur.execute(
-        "SELECT undo_id, filepath FROM undo_stack WHERE session_id = ? ORDER BY undo_id DESC LIMIT 1",
+        'SELECT undo_id, filepath FROM undo_stack WHERE session_id = ? ORDER BY undo_id DESC LIMIT 1',
         (sid,),
     )
     entry = cur.fetchone()
 
     if not entry:
-        return redirect(url_for("index"))
+        return redirect(url_for('index'))
 
     undo_id, filepath = entry
 
     cur.execute(
-        "UPDATE labels SET user_label = NULL, timestamp = NULL WHERE filepath = ?",
+        'UPDATE labels SET user_label = NULL, timestamp = NULL WHERE filepath = ?',
         (filepath,),
     )
 
-    cur.execute("DELETE FROM undo_stack WHERE undo_id = ?", (undo_id,))
+    cur.execute('DELETE FROM undo_stack WHERE undo_id = ?', (undo_id,))
 
     get_db().commit()
 
-    return redirect(url_for("index", file=filepath))
+    return redirect(url_for('index', file=filepath))
 
 
 # ---------- template ----------
@@ -1037,6 +1073,5 @@ TEMPLATE: html = """
 </html>
 """
 
-if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=8977)
-
+if __name__ == '__main__':
+    app.run(debug=False, host='0.0.0.0', port=8977)

@@ -9,7 +9,7 @@ PY="python -W ignore -m"; [ -n "$cores" ] && PY="taskset -c $cores $PY"
 OUT=$WS/results/post_$run.txt
 {
 echo "=== $run $(date)"
-$PY evaluation.summarize_cv $run
+$PY evaluation.report $run
 echo "--- Vizina held-out males (fold ensemble). NOTE: not an independent test for runs trained on Vizina/JCU weak data (neighbouring males, same territories)"
 $PY evaluation.eval_external torch:$WS/runs/$run $WS/data/vizina_eval.csv test 2>&1 | tail -2
 echo "--- expert BE/BlBh birds (out of fold, songs re-detected)"; $PY evaluation.eval_expert_birds $run 2>&1 | tail -1

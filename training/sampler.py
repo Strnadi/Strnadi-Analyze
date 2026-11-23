@@ -1,24 +1,56 @@
 """Sampling weights: class balance inside each data pool, then a fixed share of draws per pool.
 
-Without pools, the 2,000 "Unfinished" clips or one heavily sampled site (Vizina / JCU are BhBl-only) dominate,
-and synthetic counterfactuals swamp the 79 real BlBh clips (independent-review finding V5).
+A "pool" is one source table: the labelled clips ('strong') or one of the extra tables.
+Without pools, the 2,000 "Unfinished" clips or one heavily sampled site (Vizina and JCU are
+BhBl-only) would dominate, and synthetic counterfactual songs would swamp the 79 real BlBh clips
+(independent-review finding V5).
 """
+
 import numpy as np
 
 
-def pool_sampling_weights(tr, shares, balance=0.5):
-    """tr: training DataFrame with columns label, pool (+ optional hard, sw). Returns (weights, realised shares)."""
-    main = tr.apply(lambda r: r['hard'] if r.label == 'soft' else r.label.split('|')[0], axis=1) if 'hard' in tr \
-        else tr.label.map(lambda s: s.split('|')[0])
-    row_w = tr['sw'].fillna(1.0).values if 'sw' in tr else np.ones(len(tr))
-    pools = list(tr.pool.unique()); extra = [p for p in pools if p != 'strong']
-    default = 0.5 / len(extra) if extra else 0.0
-    share = {p: shares.get(p, default) for p in extra}
-    share['strong'] = max(0.05, 1 - sum(share.values()))
-    w = np.zeros(len(tr))
-    for p in pools:
-        m = (tr.pool == p).values
-        counts = main[m].value_counts()
-        wp = main[m].map(lambda c: counts[c] ** (-balance)).values * row_w[m]
-        w[m] = wp / wp.sum() * share[p]
-    return w, {p: round(float(w[(tr.pool == p).values].sum()), 3) for p in pools}
+def main_label(row):
+    """The class a row is balanced by: its hard label, or the first member of its candidate set."""
+    if row.label == 'soft':
+        return row['hard']
+    return row.label.split('|')[0]
+
+
+def pool_sampling_weights(table, extra_shares, class_balance_power=0.5):
+    """Compute one sampling weight per training row.
+
+    Args:
+        table: training rows with the columns `label` and `pool` (optionally `hard`, `sw`).
+        extra_shares: {pool name: share of all draws}. Extra pools not listed share 50 % equally.
+            The labelled pool 'strong' gets what is left (at least 5 %).
+        class_balance_power: inside a pool, a row's weight is (count of its class) ** -power.
+
+    Returns:
+        (weights, realised_shares): weights sum to 1; realised_shares is {pool: share} for logging.
+    """
+    labels = table.apply(main_label, axis=1)
+
+    if 'sw' in table:
+        row_weights = table['sw'].fillna(1.0).values
+    else:
+        row_weights = np.ones(len(table))
+
+    pools = list(table.pool.unique())
+    extra_pools = [pool for pool in pools if pool != 'strong']
+    default_share = 0.5 / len(extra_pools) if extra_pools else 0.0
+
+    shares = {pool: extra_shares.get(pool, default_share) for pool in extra_pools}
+    shares['strong'] = max(0.05, 1 - sum(shares.values()))
+
+    weights = np.zeros(len(table))
+    for pool in pools:
+        in_pool = (table.pool == pool).values
+        class_counts = labels[in_pool].value_counts()
+        balance = labels[in_pool].map(lambda name: class_counts[name] ** (-class_balance_power))
+        pool_weights = balance.values * row_weights[in_pool]
+        weights[in_pool] = pool_weights / pool_weights.sum() * shares[pool]
+
+    realised_shares = {}
+    for pool in pools:
+        realised_shares[pool] = round(float(weights[(table.pool == pool).values].sum()), 3)
+    return weights, realised_shares

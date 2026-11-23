@@ -1,49 +1,90 @@
-"""The training-time waveform augmentation chain, configured from the experiment dict.
+"""The training-time waveform augmentation chain.
 
-Order: speed -> far-field -> noise -> other species -> codec -> null splice -> polarity -> peak normalise.
-Peak normalisation (to 0.5) is applied to every clip, training and inference alike.
+Order: speed -> device EQ -> far-field -> noise -> other species -> codec -> null splice -> polarity
+-> peak normalisation. Peak normalisation (to 0.5) is applied to every clip, in training and at
+inference alike.
 """
+
 import numpy as np
-from .speed_perturb import speed_perturb
-from .far_field import far_field, load_profiles
-from .noise_mix import mix_noise, draw_chunk
-from .species_mix import species_mix
+
 from .codec_roundtrip import codec_roundtrip
+from .far_field import far_field, load_profiles
+from .noise_mix import draw_chunk, mix_noise
 from .null_splice import null_splice
 from .random_eq import random_eq
+from .species_mix import species_mix
+from .speed_perturb import speed_perturb
 
 
-def peak_normalize(y, peak=0.5):
-    pk = np.abs(y).max()
-    return (y / pk * peak).astype(np.float32) if pk > 1e-6 else y.astype(np.float32)
+def peak_normalize(waveform, peak=0.5):
+    """Scale a waveform so its largest absolute sample equals `peak` (silence is left untouched)."""
+    current_peak = np.abs(waveform).max()
+    if current_peak <= 1e-6:
+        return waveform.astype(np.float32)
+    return (waveform / current_peak * peak).astype(np.float32)
+
+
+def happens(probability):
+    """Draw a random yes/no with the given probability."""
+    return np.random.rand() < probability
 
 
 class WaveAugment:
-    def __init__(self, cfg, noise_bank=None, species_bank=None, far_csv=None):
-        g = cfg.get
-        self.speed, self.p_noise, self.snr, self.snr_mode = g('speed', 0.02), g('p_noise', 0.0), g('snr', (0.0, 20.0)), g('snr_mode', 'ending')
-        self.p_far, self.p_codec, self.p_splice, self.p_species, self.p_eq = g('p_far', 0.0), g('p_codec', 0.0), g('p_splice', 0.0), g('p_species', 0.0), g('p_eq', 0.0)
-        self.noise, self.species = noise_bank, species_bank
-        self.profiles = load_profiles(far_csv) if (far_csv and self.p_far > 0) else []
+    """Applies the augmentations switched on in a `TrainSettings` object to one waveform.
 
-    def __call__(self, y, force_noise=False):
-        n = len(y); r = np.random.rand
-        if self.speed > 0 and r() < 0.5:
-            y = speed_perturb(y, self.speed)
-        if self.p_eq > 0 and r() < self.p_eq:
-            y = random_eq(y)
-        far_snr = None
-        if self.profiles and r() < self.p_far:
-            y, far_snr = far_field(y, self.profiles[np.random.randint(len(self.profiles))])
-        if self.noise is not None and (far_snr is not None or force_noise or r() < self.p_noise):
-            snr = far_snr if far_snr is not None else np.random.uniform(*self.snr)
-            y = mix_noise(y, draw_chunk(self.noise, n), snr, self.snr_mode)
-        if self.species is not None and r() < self.p_species:
-            y = species_mix(y, draw_chunk(self.species, n))
-        if self.p_codec > 0 and r() < self.p_codec:
-            y = codec_roundtrip(y)
-        if self.p_splice > 0 and r() < self.p_splice:
-            y = null_splice(y)
-        if r() < 0.5:
-            y = -y
-        return peak_normalize(y)
+    Args:
+        settings: the experiment's `TrainSettings`.
+        noise_bank: list of background-noise chunks, or None.
+        species_bank: list of other-species windows, or None.
+        far_field_csv: table of measured far-field profiles (needed only for far-field simulation).
+    """
+
+    def __init__(self, settings, noise_bank=None, species_bank=None, far_field_csv=None):
+        self.settings = settings
+        self.noise_bank = noise_bank
+        self.species_bank = species_bank
+
+        self.far_field_profiles = []
+        if far_field_csv and settings.far_field_probability > 0:
+            self.far_field_profiles = load_profiles(far_field_csv)
+
+    def __call__(self, waveform, force_noise=False):
+        """Return an augmented, peak-normalised copy of `waveform` (same length)."""
+        settings = self.settings
+        n_samples = len(waveform)
+
+        if settings.speed_jitter > 0 and happens(0.5):
+            waveform = speed_perturb(waveform, settings.speed_jitter)
+
+        if happens(settings.random_eq_probability):
+            waveform = random_eq(waveform)
+
+        # Far-field simulation dictates the noise level that goes with the simulated distance.
+        far_field_snr = None
+        if self.far_field_profiles and happens(settings.far_field_probability):
+            profile = self.far_field_profiles[np.random.randint(len(self.far_field_profiles))]
+            waveform, far_field_snr = far_field(waveform, profile)
+
+        add_noise = far_field_snr is not None or force_noise or happens(settings.noise_probability)
+        if self.noise_bank is not None and add_noise:
+            if far_field_snr is not None:
+                snr_db = far_field_snr
+            else:
+                snr_db = np.random.uniform(*settings.snr_db_range)
+            noise = draw_chunk(self.noise_bank, n_samples)
+            waveform = mix_noise(waveform, noise, snr_db, settings.snr_reference)
+
+        if self.species_bank is not None and happens(settings.species_probability):
+            other_species = draw_chunk(self.species_bank, n_samples)
+            waveform = species_mix(waveform, other_species)
+
+        if happens(settings.codec_probability):
+            waveform = codec_roundtrip(waveform)
+
+        if happens(settings.splice_probability):
+            waveform = null_splice(waveform)
+
+        if happens(0.5):
+            waveform = -waveform  # polarity flip: free invariance
+
+        return peak_normalize(waveform)

@@ -14,33 +14,47 @@ report metrics on a test set filtered this way.
 
 Usage: python -m processing.build_disputed base_v3 r1_s0 r2_s0 [--table data/orig_aligned.csv] [--p_own 0.1]
 """
+
 import argparse
 import glob
 import numpy as np
 import pandas as pd
 from config import WS, CLASSES, C2I, DIALECTS, UNFINISHED_IDX
-from training.defaults import ws
+from config import workspace_path
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('runs', nargs='+'); ap.add_argument('--table', default='data/orig_aligned.csv')
-    ap.add_argument('--out'); ap.add_argument('--p_own', type=float, default=0.1)
+    ap = argparse.ArgumentParser()
+    ap.add_argument('runs', nargs='+')
+    ap.add_argument('--table', default='data/orig_aligned.csv')
+    ap.add_argument('--out')
+    ap.add_argument('--p_own', type=float, default=0.1)
     a = ap.parse_args()
-    df = pd.read_csv(ws(a.table), keep_default_na=False, na_values=['']); votes = {}
+    df = pd.read_csv(workspace_path(a.table), keep_default_na=False, na_values=[''])
+    votes = {}
     for run in a.runs:
         for f in glob.glob(f'{WS}/runs/{run}/fold*/oof.npz'):
             z = np.load(f, allow_pickle=True)
             for i, p in zip(z['idx'], z['p']):
                 votes.setdefault(int(i), []).append(p)
     idx = np.array(sorted(i for i, v in votes.items() if len(v) == len(a.runs)))
-    P = np.stack([np.mean(votes[i], 0) for i in idx]); y = df.loc[idx, 'label'].map(C2I).values
+    P = np.stack([np.mean(votes[i], 0) for i in idx])
+    y = df.loc[idx, 'label'].map(C2I).values
     own = P[np.arange(len(idx)), y]
-    disputed = df.loc[idx, 'label'].isin(DIALECTS).values & (own < a.p_own) & (P.argmax(1) == UNFINISHED_IDX)
-    df['disputed'] = False; df['train_label'] = np.nan
+    disputed = (
+        df.loc[idx, 'label'].isin(DIALECTS).values
+        & (own < a.p_own)
+        & (P.argmax(1) == UNFINISHED_IDX)
+    )
+    df['disputed'] = False
+    df['train_label'] = np.nan
     df.loc[idx[disputed], 'disputed'] = True
     df.loc[idx[disputed], 'train_label'] = df.loc[idx[disputed], 'label'] + '|Unfinished'
-    out = ws(a.out or a.table.replace('.csv', '_disputed.csv')); df.to_csv(out, index=False)
-    audit = df.loc[idx[disputed], ['name', 'label', 'npy', 't0']].assign(p_own=own[disputed], p_unfinished=P[disputed, UNFINISHED_IDX])
+    out = workspace_path(a.out or a.table.replace('.csv', '_disputed.csv'))
+    df.to_csv(out, index=False)
+    audit = df.loc[idx[disputed], ['name', 'label', 'npy', 't0']].assign(
+        p_own=own[disputed], p_unfinished=P[disputed, UNFINISHED_IDX]
+    )
     audit.sort_values('p_own').to_csv(f'{WS}/results/disputed_for_experts.csv', index=False)
     print(f'{int(disputed.sum())} disputed dialect clips of {len(idx)} scored ->', out)
     print(df.loc[idx[disputed]].label.value_counts().to_dict())

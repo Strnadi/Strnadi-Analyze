@@ -1,0 +1,12 @@
+[project]
+name = "strnadi-analyze"
+version = "0.2.0"
+description = "Yellowhammer dialect models for the Strnadi citizen-science project"
+requires-python = ">=3.10"
+
+# Code style: `uvx ruff format .` (run from the repository root)
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+quote-style = "single"

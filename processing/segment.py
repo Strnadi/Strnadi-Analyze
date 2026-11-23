@@ -3,18 +3,21 @@ out of long weakly-labelled recordings.  Not used at inference (the model does S
 
 song events = hysteresis-thresholded tonal-SNR envelope in 2-10 kHz, gaps < max_gap merged.
 """
+
 import numpy as np
 from scipy.ndimage import uniform_filter1d, median_filter
 
 SR = 32000
-NFFT, HOP = 1024, 320          # 32 ms window, 10 ms hop
+NFFT, HOP = 1024, 320  # 32 ms window, 10 ms hop
 FPS = SR / HOP
 
 
 def stft_mag(y):
     import numpy.lib.stride_tricks as st
+
     y = np.asarray(y, np.float32)
-    if len(y) < NFFT: y = np.pad(y, (0, NFFT - len(y)))
+    if len(y) < NFFT:
+        y = np.pad(y, (0, NFFT - len(y)))
     n = 1 + (len(y) - NFFT) // HOP
     frames = st.as_strided(y, shape=(n, NFFT), strides=(y.strides[0] * HOP, y.strides[0]))
     w = np.hanning(NFFT).astype(np.float32)
@@ -38,8 +41,9 @@ def tonal_snr(y, fmin=2000, fmax=10000, noise_win_s=8.0):
     top = np.sort(snr, axis=1)[:, -3:].mean(1)
     env = uniform_filter1d(top, size=5)
     # remove the (biased) baseline of the max-statistic: running median over ~10 s
-    st = max(1, int(FPS * 0.2)); kb = max(3, int(10 * FPS / st) | 1)
-    base = np.repeat(median_filter(env[::st], size=kb, mode='nearest'), st)[:len(env)]
+    st = max(1, int(FPS * 0.2))
+    kb = max(3, int(10 * FPS / st) | 1)
+    base = np.repeat(median_filter(env[::st], size=kb, mode='nearest'), st)[: len(env)]
     return env - base
 
 

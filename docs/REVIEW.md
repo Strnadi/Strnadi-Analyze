@@ -24,12 +24,12 @@ Numbers are recording-grouped 5-fold CV on the 3,744 human-labelled clips unless
 | # | Defect | State |
 |---|---|---|
 | 1 | Noise bank contains Yellowhammer songs (36 of 400 sampled chunks flagged; clear songs among them), mixed into half of all training clips | `processing/clean_noise_bank.py`; corrected recipes use `noise_bank_clean.npy` (**must be built**) |
-| 2 | Noise level referenced to the loud first phrase; the terminal element is fainter | `augment/noise_mix.py` mode `ending` + SNR range raised to 6-26 dB. Partial: the energy rule finds the first terminal element, not the faintest one |
-| 3 | Factorised-head weak loss gives no completeness supervision | `losses/bag_complete.py` + `experiments/bag_completeness.py`; `training/train_mil.py` |
+| 2 | Noise level referenced to the loud first phrase; the terminal element is fainter | `augment/noise_mix.py` reference `ending` + SNR range raised to 6-26 dB. Partial: the energy rule finds the first terminal element, not the faintest one |
+| 3 | Factorised-head weak loss gives no completeness supervision | `losses/bag_complete.py` + `experiments/bag_completeness.py`; `training/bird_level.py` |
 | 4 | Checkpoint choice on a ~380-clip inner set is noise (argmax 0.757 vs last epoch 0.760) and costs 15 % of training data | default rule is the 3-epoch smoothed one; `experiments/fixed_schedule_no_inner_val.py` |
-| 5 | Evaluation window ended 3.4 s after onset (documented as 3.8 s): long songs lost their ending | `eval_crop='center'` (default); research runs reproducible with `'start'` |
+| 5 | Evaluation window ended 3.4 s after onset (documented as 3.8 s): long songs lost their ending | `eval_window='center'` (default); research runs reproducible with `'start'` |
 | 6 | `compare_runs` mixed runs evaluated on different clip tables / windows; one-seed intervals read as significance | `evaluation/compare_runs.py` refuses mixed tables, reports completeness AUC, prints the seed caveat; `evaluation/rescore_oof.py` |
-| 7 | Pretrained backbones trained with from-scratch settings in the architecture sweep | `backbone_lr_mult` (0.1 in the `arch_*` experiments) |
+| 7 | Pretrained backbones trained with from-scratch settings in the architecture sweep | `backbone_lr_factor` (0.1 in the `arch_*` experiments) |
 | 8 | Per-frequency median subtraction removes song energy when the song fills the window | `layers/log_percentile_norm.py`, `layers/pcen.py` + front-end experiments |
 | 9 | Byte-identical recordings under different F-ids (107 groups, 81 across folds, some with conflicting labels) | `processing/make_folds.py --dedupe` (**folds must be rebuilt**) |
 | 10 | Folds do not separate observers / sites (observer predicts dialect at 0.81 vs 0.69) | `make_folds.py --group_map`; needs a recording -> observer table that does not exist yet |

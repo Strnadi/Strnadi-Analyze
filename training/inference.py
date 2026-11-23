@@ -1,37 +1,61 @@
 """Batch inference helpers shared by evaluation, pseudo-labelling, export and the service."""
+
 import numpy as np
 import torch
+
 from config import SR
+
 from .checkpoint import load_model, run_checkpoints
 from .data import load_seg
 
 
-def peak_normalize(X, peak=0.5):
-    return (X / np.maximum(np.abs(X).max(-1, keepdims=True), 1e-6) * peak).astype(np.float32)
+def peak_normalize(batch, peak=0.5):
+    """Scale every waveform of a (N, samples) array to the same peak."""
+    peaks = np.abs(batch).max(-1, keepdims=True)
+    return (batch / np.maximum(peaks, 1e-6) * peak).astype(np.float32)
 
 
-def windows(df, offsets=(0.0,), win=4.0):
-    """(len(df) * len(offsets), n) peak-normalised windows starting at t0 + offset."""
-    n = int(win * SR)
-    return peak_normalize(np.stack([load_seg(r.npy, r.t0 + o, r.t0 + o + win, n) for r in df.itertuples() for o in offsets]))
+def windows(table, offsets=(0.0,), win=4.0):
+    """Cut peak-normalised windows for every table row and every start offset.
+
+    Returns:
+        array of shape (len(table) * len(offsets), samples), rows in table order,
+        offsets varying fastest.
+    """
+    n_samples = int(win * SR)
+    cut = []
+    for row in table.itertuples():
+        for offset in offsets:
+            start = row.t0 + offset
+            cut.append(load_seg(row.npy, start, start + win, n_samples))
+    return peak_normalize(np.stack(cut))
 
 
 class TorchEnsemble:
-    """Average class probabilities over the fold models of a run directory (or one checkpoint file)."""
+    """The fold models of a run directory (or one checkpoint), averaged.
 
-    def __init__(self, spec, name='model.pt'):
-        self.models = [load_model(p) for p in run_checkpoints(spec, name)]
+    Calling it on a (N, samples) array returns averaged class probabilities (N, 7).
+    """
+
+    def __init__(self, run_or_file, name='model.pt'):
+        self.models = [load_model(path) for path in run_checkpoints(run_or_file, name)]
         if not self.models:
-            raise FileNotFoundError(f'no checkpoints under {spec}')
+            raise FileNotFoundError(f'no checkpoints under {run_or_file}')
 
     @torch.no_grad()
-    def __call__(self, X, bs=64, key='logits'):
+    def __call__(self, batch, bs=64, key='logits'):
         total = 0
-        for m in self.models:
-            outs = [m(torch.from_numpy(X[i:i + bs]))[key] for i in range(0, len(X), bs)]
-            y = torch.cat(outs)
-            total = total + (torch.softmax(y, 1) if key == 'logits' else y).numpy()
+        for model in self.models:
+            outputs = []
+            for start in range(0, len(batch), bs):
+                chunk = torch.from_numpy(batch[start : start + bs])
+                outputs.append(model(chunk)[key])
+            outputs = torch.cat(outputs)
+            if key == 'logits':
+                outputs = torch.softmax(outputs, 1)
+            total = total + outputs.numpy()
         return total / len(self.models)
 
-    def embed(self, X, bs=64):
-        return self(X, bs, key='emb')
+    def embed(self, batch, bs=64):
+        """Averaged clip embeddings (N, D)."""
+        return self(batch, bs, key='emb')

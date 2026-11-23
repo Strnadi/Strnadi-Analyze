@@ -1,8 +1,62 @@
-from .recipes import R7
+# %% [markdown]
+# # arch_contour_tcn
+#
+# Architecture comparison: 1-D TCN over top-3 pitch-contour features (0.27 M params, ~5x cheaper
+# than StrnadNet).
+#
+# **Question.** The "ornithologist's view" (pitch tracks only) is enough, at a fraction of the
+# cost.
+#
+# **Status:** queued (from the research session). Not finished. See contour_ridge.py for the sub-
+# bin variant.
+#
+# Run from the repository root with `python -m experiments.arch_contour_tcn`, or step through the
+# cells in an editor / Jupyter whose working directory is the repository root. Training writes to
+# `$STRNADI_WS/runs/arch_contour_tcn/`.
 
-EXPERIMENT = dict(
-    R7, model='contour_tcn', model_kw=dict(head='factorized'), folds=[0, 1, 2],
-    description='Architecture comparison: 1-D TCN over top-3 pitch-contour features (0.27 M params, ~5x cheaper than StrnadNet).',
-    hypothesis='The "ornithologist\'s view" (pitch tracks only) is enough, at a fraction of the cost.',
-    origin='research-session', status='queued', result='Not finished. See contour_ridge.py for the sub-bin variant.',
+# %% Imports
+from evaluation.report import plot_error_examples, plot_run, summarize_run
+from model.contour_tcn import ContourTCN
+from training.fit import cross_validate
+from training.settings import TrainSettings
+
+# %% Settings (everything not listed keeps its default from training/settings.py)
+RUN = 'arch_contour_tcn'
+
+settings = TrainSettings(
+    # data
+    labelled_table='data/orig_aligned.csv',
+    extra_tables={
+        'data/weak_v3.csv': 0.35,
+        'data/cf_v4.csv': 0.08,
+        'data/vizann_v1.csv': 0.07,
+    },
+    noise_bank='data/noise_bank_audiomoth.npy',
+    eval_window='start',
+    # protocol
+    folds=[0, 1, 2],
+    checkpoint_rule='inner_argmax',
+    # optimisation
+    epochs=25,
+    samples_per_epoch=6144,
+    batch_size=48,
+    learning_rate=0.002,
+    # waveform augmentation
+    noise_probability=0.5,
+    snr_reference='band',
+    splice_probability=0.3,
 )
+
+
+# %% Model
+def make_model():
+    return ContourTCN(head='factorized')
+
+
+# %% Train: one model per fold (recording-grouped cross-validation)
+cross_validate(RUN, make_model, settings)
+
+# %% Evaluate on the held-out clips of every fold
+summarize_run(RUN)
+plot_run(RUN)
+plot_error_examples(RUN)

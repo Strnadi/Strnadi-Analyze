@@ -2,9 +2,10 @@
 
 Used for (a) song-activity detection (n_tags = 1, sigmoid) and (b) element tagging (softmax over
 background / phrase / B / C / D / E / X), the TweetyNet / DAS formulation of birdsong annotation.
-Origin: research StrnadNet had an unused `frame_head`; both reviews ask for a frame-level detector, the fork
-review for element-sequence output.
+Origin: research StrnadNet had an unused `frame_head`; both reviews ask for a frame-level detector,
+the fork review for element-sequence output.
 """
+
 import torch.nn as nn
 
 
@@ -14,4 +15,5 @@ class FrameTagHead(nn.Module):
         self.conv = nn.Conv1d(d, n_tags, 1)
 
     def forward(self, frames):
+        """Frame series (B, D, T) -> per-frame logits (B, n_tags, T)."""
         return self.conv(frames)

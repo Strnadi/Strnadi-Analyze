@@ -14,6 +14,7 @@ What changed from `split.py`, and why:
 
 Usage: python -m processing.cut_songs <in_dir> <out_dir> [--detector runs/<run>/fold0/model.pt]
 """
+
 import argparse
 import os
 from pathlib import Path
@@ -29,10 +30,14 @@ PRE, WIN, MAX_SONG = 0.6, 4.4, 3.8
 def find_songs(y, detector=None):
     if detector is not None:
         import torch
-        return [(t0, t1) for t0, t1, _ in detector.detect(torch.from_numpy(y / max(np.abs(y).max(), 1e-6) * 0.5))]
+
+        return [
+            (t0, t1)
+            for t0, t1, _ in detector.detect(torch.from_numpy(y / max(np.abs(y).max(), 1e-6) * 0.5))
+        ]
     segs, _ = segment_songs(y, hi=10, lo=4, max_gap=0.3, min_dur=0.4, max_dur=6.0)
     events = []
-    for s0, s1, _ in segs:                                   # merge pieces of one song (gap < 0.6 s, total <= 4 s)
+    for s0, s1, _ in segs:  # merge pieces of one song (gap < 0.6 s, total <= 4 s)
         if events and s0 - events[-1][1] < 0.6 and s1 - events[-1][0] <= 4.0:
             events[-1][1] = s1
         else:
@@ -41,12 +46,17 @@ def find_songs(y, detector=None):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('in_dir'); ap.add_argument('out_dir'); ap.add_argument('--detector')
+    ap = argparse.ArgumentParser()
+    ap.add_argument('in_dir')
+    ap.add_argument('out_dir')
+    ap.add_argument('--detector')
     a = ap.parse_args()
     import librosa, soundfile as sf
+
     detector = None
     if a.detector:
         from training.checkpoint import load_model
+
         detector = load_model(a.detector)
     rows = []
     for path in sorted(p for p in Path(a.in_dir).rglob('*') if p.suffix.lower() in EXT):
@@ -55,8 +65,10 @@ def main():
         for k, (s0, s1) in enumerate(find_songs(y, detector)):
             if s1 - s0 > MAX_SONG:
                 continue
-            i0 = int(max(0, min(s0 - PRE, len(y) / SR - WIN)) * SR); clip = y[i0:i0 + int(WIN * SR)]
-            out = Path(a.out_dir) / f'{rel}.{k:03d}.wav'; os.makedirs(out.parent, exist_ok=True)
+            i0 = int(max(0, min(s0 - PRE, len(y) / SR - WIN)) * SR)
+            clip = y[i0 : i0 + int(WIN * SR)]
+            out = Path(a.out_dir) / f'{rel}.{k:03d}.wav'
+            os.makedirs(out.parent, exist_ok=True)
             sf.write(out, clip, SR, subtype='PCM_16')
             rows.append(dict(source=str(path), clip=str(out), t0=i0 / SR, song_t0=s0, song_t1=s1))
     pd.DataFrame(rows).to_csv(Path(a.out_dir) / 'cuts.csv', index=False)

@@ -1,8 +1,10 @@
-"""Linear projection of the student's clip embedding into a teacher's embedding space (e.g. Perch 2.0, 1536-d),
-trained with `losses/distill_cosine.py`. This is the BirdCLEF 2026 winning recipe for small CPU models and it
-gives every per-project head on the BioAcu platform one shared embedding space.
+"""Linear projection of the student's clip embedding into a teacher's embedding space (e.g. Perch
+2.0, 1536-d), trained with `losses/distill_cosine.py`. This is the BirdCLEF 2026 winning recipe for
+small CPU models and it gives every per-project head on the BioAcu platform one shared embedding
+space.
 Origin: research session (`--w_distill`, implemented but never queued); both reviews rank it first.
 """
+
 import torch.nn as nn
 
 
@@ -12,4 +14,5 @@ class DistillProjection(nn.Module):
         self.proj = nn.Linear(d, teacher_dim)
 
     def forward(self, e):
+        """Student embedding e (B, D) -> (B, teacher_dim)."""
         return self.proj(e)

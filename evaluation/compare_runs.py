@@ -12,6 +12,7 @@ Corrections over the research version (base-session audit):
 
 Usage: python -m evaluation.compare_runs <runA[,runA_s1]> <runB[,...]> [n_boot=2000]
 """
+
 import glob
 import json
 import sys
@@ -19,7 +20,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, roc_auc_score
 from config import CLASSES, C2I, WS, DIALECTS, DIALECT_IDX, UNFINISHED_IDX
-from training.defaults import ws
+from config import workspace_path
 
 
 def oof(spec):
@@ -31,8 +32,16 @@ def oof(spec):
         for f in files:
             z = np.load(f, allow_pickle=True)
             # research-session runs stored neither: they used data/orig_index.csv (or orig_aligned.csv from R7 on) and the 'start' window
-            meta.add((str(z['strong']) if 'strong' in z else json.load(open(f'{WS}/runs/{run}/args.json')).get('strong', 'data/orig_index.csv').replace(f'{WS}/', ''),
-                      str(z['eval_crop']) if 'eval_crop' in z else 'start'))
+            meta.add(
+                (
+                    str(z['strong'])
+                    if 'strong' in z
+                    else json.load(open(f'{WS}/runs/{run}/args.json'))
+                    .get('strong', 'data/orig_index.csv')
+                    .replace(f'{WS}/', ''),
+                    str(z['eval_crop']) if 'eval_crop' in z else 'start',
+                )
+            )
             for i, p in zip(z['idx'], z['p']):
                 acc.setdefault((run, int(i)), p)
     by_clip = {}
@@ -43,38 +52,79 @@ def oof(spec):
 
 
 def main():
-    A, meta_a, na = oof(sys.argv[1]); B, meta_b, nb_ = oof(sys.argv[2]); n_boot = int(sys.argv[3]) if len(sys.argv) > 3 else 2000
+    A, meta_a, na = oof(sys.argv[1])
+    B, meta_b, nb_ = oof(sys.argv[2])
+    n_boot = int(sys.argv[3]) if len(sys.argv) > 3 else 2000
     if len(meta_a | meta_b) != 1:
-        sys.exit(f'refusing to compare: runs were evaluated on different tables / windows: {sorted(meta_a)} vs {sorted(meta_b)}.\n'
-                 f'Re-score one side on the other\'s table first (evaluation/rescore_oof.py).')
+        sys.exit(
+            f'refusing to compare: runs were evaluated on different tables / windows: {sorted(meta_a)} vs {sorted(meta_b)}.\n'
+            f"Re-score one side on the other's table first (evaluation/rescore_oof.py)."
+        )
     table = next(iter(meta_a))[0]
-    data = pd.read_csv(ws(table), keep_default_na=False, na_values=[''])
-    idx = np.array(sorted(set(A) & set(B))); d = data.loc[idx]; y = d.label.map(C2I).values; g = d.grp.values
-    PA, PB = np.stack([A[i] for i in idx]), np.stack([B[i] for i in idx]); pa, pb = PA.argmax(1), PB.argmax(1)
+    data = pd.read_csv(workspace_path(table), keep_default_na=False, na_values=[''])
+    idx = np.array(sorted(set(A) & set(B)))
+    d = data.loc[idx]
+    y = d.label.map(C2I).values
+    g = d.grp.values
+    PA, PB = np.stack([A[i] for i in idx]), np.stack([B[i] for i in idx])
+    pa, pb = PA.argmax(1), PB.argmax(1)
 
     def stats(sel):
-        ys = y[sel]; out = {'macro_f1': f1_score(ys, pa[sel], average='macro', labels=range(7)) - f1_score(ys, pb[sel], average='macro', labels=range(7))}
+        ys = y[sel]
+        out = {
+            'macro_f1': f1_score(ys, pa[sel], average='macro', labels=range(7))
+            - f1_score(ys, pb[sel], average='macro', labels=range(7))
+        }
         for c in range(7):
             m = ys == c
-            out[CLASSES[c]] = ((pa[sel][m] == c).mean() - (pb[sel][m] == c).mean()) if m.any() else np.nan
-        for name in DIALECTS:                              # the decision that actually fails: complete vs Unfinished
+            out[CLASSES[c]] = (
+                ((pa[sel][m] == c).mean() - (pb[sel][m] == c).mean()) if m.any() else np.nan
+            )
+        for name in DIALECTS:  # the decision that actually fails: complete vs Unfinished
             m = (ys == C2I[name]) | (ys == UNFINISHED_IDX)
             if (ys[m] == C2I[name]).any() and (ys[m] == UNFINISHED_IDX).any():
-                out[f'auc_complete_{name}'] = (roc_auc_score(ys[m] == C2I[name], PA[sel][m][:, DIALECT_IDX].sum(1))
-                                               - roc_auc_score(ys[m] == C2I[name], PB[sel][m][:, DIALECT_IDX].sum(1)))
+                out[f'auc_complete_{name}'] = roc_auc_score(
+                    ys[m] == C2I[name], PA[sel][m][:, DIALECT_IDX].sum(1)
+                ) - roc_auc_score(ys[m] == C2I[name], PB[sel][m][:, DIALECT_IDX].sum(1))
         return out
 
     point = stats(np.arange(len(idx)))
-    groups = np.unique(g); members = {k: np.where(g == k)[0] for k in groups}; rng = np.random.default_rng(0)
-    boots = pd.DataFrame([stats(np.concatenate([members[k] for k in rng.choice(groups, len(groups))])) for _ in range(n_boot)])
-    res = {k: dict(diff=float(point[k]), ci95=[float(boots[k].quantile(0.025)), float(boots[k].quantile(0.975))], p_A_better=float((boots[k] > 0).mean()))
-           for k in point}
-    print(f'{sys.argv[1]}  vs  {sys.argv[2]}   table {table}; common OOF clips {len(idx)}; groups {len(groups)}')
+    groups = np.unique(g)
+    members = {k: np.where(g == k)[0] for k in groups}
+    rng = np.random.default_rng(0)
+    boots = pd.DataFrame(
+        [
+            stats(np.concatenate([members[k] for k in rng.choice(groups, len(groups))]))
+            for _ in range(n_boot)
+        ]
+    )
+    res = {
+        k: dict(
+            diff=float(point[k]),
+            ci95=[float(boots[k].quantile(0.025)), float(boots[k].quantile(0.975))],
+            p_A_better=float((boots[k] > 0).mean()),
+        )
+        for k in point
+    }
+    print(
+        f'{sys.argv[1]}  vs  {sys.argv[2]}   table {table}; common OOF clips {len(idx)}; groups {len(groups)}'
+    )
     for k, v in res.items():
-        print(f'  {k:18s} A-B {v["diff"]:+.3f}  95% CI [{v["ci95"][0]:+.3f}, {v["ci95"][1]:+.3f}]  P(A>B)={v["p_A_better"]:.2f}')
+        print(
+            f'  {k:18s} A-B {v["diff"]:+.3f}  95% CI [{v["ci95"][0]:+.3f}, {v["ci95"][1]:+.3f}]  P(A>B)={v["p_A_better"]:.2f}'
+        )
     if na == 1 or nb_ == 1:
-        print('  NOTE: one seed per side: the interval covers test-set sampling only, not training-seed variance.')
-    json.dump(res, open(f'{WS}/results/compare_{sys.argv[1].replace(",", "+")}__{sys.argv[2].replace(",", "+")}.json', 'w'), indent=1)
+        print(
+            '  NOTE: one seed per side: the interval covers test-set sampling only, not training-seed variance.'
+        )
+    json.dump(
+        res,
+        open(
+            f'{WS}/results/compare_{sys.argv[1].replace(",", "+")}__{sys.argv[2].replace(",", "+")}.json',
+            'w',
+        ),
+        indent=1,
+    )
 
 
 if __name__ == '__main__':
