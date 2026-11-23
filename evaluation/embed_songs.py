@@ -6,7 +6,7 @@ Each song is scored by the fold model that never saw its recording (folds from t
 Writes results/song_emb_<run>.npz with arrays emb (S, D), prob (S, 7), rec (S,), fold (S,), and the
 recording-level label per song (`bag_label`: the single dialect in the song's candidate set, or '').
 
-Usage: python -m evaluation.embed_songs <run> [--table data/weak_v3.csv]
+Usage: python -m evaluation.embed_songs <run> [--table data/weak_v5.csv]
 """
 
 import argparse
@@ -28,7 +28,7 @@ OFFS = (
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('run')
-    ap.add_argument('--table', default='data/weak_v3.csv')
+    ap.add_argument('--table', default='data/weak_v5.csv')
     a = ap.parse_args()
     torch.set_num_threads(int(os.environ.get('THREADS', 4)))
     W = read_table(a.table)

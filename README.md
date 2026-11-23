@@ -17,7 +17,7 @@ Classes: `BC, BE, BhBl, BlBh, None, Unfinished, XB`. Every model takes a mono 32
 | `training/` | What the experiment scripts call: `settings.py` (every setting with its default), `fit.py` (cross-validated training), `data.py`, plus `pretrain.py`, `unsupervised.py`, `bird_level.py`, `identity.py` |
 | `evaluation/` | `report.py` = the shared evaluation functions (validation, metrics, confusion matrix, learning curves, error sheets); further evaluation scripts |
 | `processing/` | Data preparation: decoding, song segmentation, table builders, BirdNET / Perch extraction |
-| `serving/` | ONNX export, song-level inference pipeline, FastAPI app (`runner.py` is the entry point) |
+| `serving/` | ONNX and TFLite export, song-level inference pipeline, FastAPI app (`runner.py` is the entry point) |
 | `data-generation/`, `vastai-serverless/` | The labelling web app; the Vast.ai worker in front of the service |
 | `tests/`, `tools/`, `docs/` | Tests and checks; small utilities; `docs/REVIEW.md` (findings), `docs/STATUS.md` (what is verified) |
 
@@ -76,7 +76,9 @@ STRNADI_DRY_RUN=1 python -m experiments.frontend_pcen # build the model, stop be
 python -m evaluation.report <run>                     # the evaluation cells for any finished run
 python -m evaluation.compare_runs <runA> <runB>       # paired recording bootstrap
 evaluation/post_eval.sh <run>                         # external test sets as well
-python -m serving.export_onnx <run_dir> model.onnx    # export + parity check
+python -m serving.export_onnx <run_dir> model.onnx    # export + parity check (backend)
+python -m serving.export_tflite model.onnx            # phone build; needs onnx2tf + TensorFlow
+python -m tests.check_tflite <run_dir> model_tflite/*.tflite   # the same parity check for the phone build
 docker compose up --build                             # service on :8000 (POST /classify)
 ```
 

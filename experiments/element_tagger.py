@@ -35,7 +35,7 @@ settings = TrainSettings(
     # data
     labelled_table='data/orig_aligned.csv',
     extra_tables={
-        'data/weak_v3.csv': 0.35,
+        'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
         'data/vizann_v1.csv': 0.07,
         'data/element_frames_v1.csv': 0.1,

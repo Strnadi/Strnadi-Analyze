@@ -7,9 +7,10 @@
 # **Question.** Fewer false alarms on similar trills (Chiffchaff, Chaffinch, ...) and robustness
 # to app audio compression.
 #
-# **Status:** done (from the research session). 5 folds: macro-F1 0.761, acc 0.867 (computed from
-# the out-of-fold predictions; not yet in the research log). None recall 0.55 (R2: 0.50),
-# everything else within noise of R2 or slightly below.
+# **Status:** done (from the research session). 5 folds: macro-F1 0.761, acc 0.867; -0.013 against
+# R2, P(R2 better) 0.95. None recall +0.048 (the hard negatives work), dialects worse (BC -0.015, XB
+# -0.022, BhBl -0.035). To be retried with a lower share of hard negatives; the codec part cannot
+# show a benefit without phone audio (research log 17.5, device_robustness.py).
 #
 # Run from the repository root with `python -m experiments.r5_hardneg_codec`, or step through the
 # cells in an editor / Jupyter whose working directory is the repository root. Training writes to

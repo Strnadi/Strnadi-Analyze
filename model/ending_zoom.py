@@ -6,7 +6,7 @@ decision live.
 2. Song end: from the coarse spectrogram, the last frame whose tonal energy (mean of the 3 strongest
    bins, smoothed) exceeds a fraction of the clip maximum. Fixed rule, identical in training and
    inference.
-3. Zoom branch: the waveform from 1.0 s before to 0.5 s after that point, analysed at 64 ms window /
+3. Zoom branch: the waveform from 0.6 s before to 1.2 s after that point, analysed at 64 ms window /
    5 ms hop on a linear 2.5-9.5 kHz axis (~27 Hz per bin: the 100-250 Hz dialect criteria become
    4-9 bins instead of 1-3), through a long-kernel stem and three residual stages.
 4. Both embeddings are concatenated into a factorised head (song / complete / dialect).
@@ -46,7 +46,9 @@ class EndingZoomNet(Model):
         d: channels of the frame series, in both branches.
         emb_dim: size of the coarse clip embedding and of the fused embedding.
         before_s: seconds of audio the crop keeps before the detected song end.
-        after_s: seconds of audio the crop keeps after the detected song end.
+        after_s: seconds of audio the crop keeps after the detected song end. The rule in step 2
+            often stops at the B element; the quiet terminal C / E element of BC / BE songs follows
+            up to 1.1 s later (research log 17.4), so the crop has to reach that far.
         rel_threshold: a frame counts as song when its tonal energy exceeds this fraction of the
             clip maximum (used to find the song end).
         drop: dropout on the fused embedding before the classifier (also passed to the coarse
@@ -70,8 +72,8 @@ class EndingZoomNet(Model):
         zoom_widths=(24, 48, 96),
         d=128,
         emb_dim=128,
-        before_s=1.0,
-        after_s=0.5,
+        before_s=0.6,
+        after_s=1.2,
         rel_threshold=0.3,
         drop=0.2,
         head='factorized',
@@ -172,15 +174,15 @@ class EndingZoomNet(Model):
         end = self.song_end(coarse_spectrogram)  # (B,)   in samples
 
         # --- cut the crop [end - before, end + after) out of the waveform, kept inside the clip
-        crop_length = self.before + self.after  # 48000 samples = 1.5 s
+        crop_length = self.before + self.after  # 57600 samples = 1.8 s
         start = (end - self.before).clamp(0, wave.shape[1] - crop_length)  # (B,)
-        offsets = torch.arange(crop_length, device=wave.device)  # (48000,)
-        sample_index = start[:, None] + offsets[None]  # (B, 48000)
-        crop = wave.gather(1, sample_index)  # (B, 48000)
+        offsets = torch.arange(crop_length, device=wave.device)  # (57600,)
+        sample_index = start[:, None] + offsets[None]  # (B, 57600)
+        crop = wave.gather(1, sample_index)  # (B, 57600)
 
         # --- zoom branch on the crop
-        zoom_spectrogram = self.zoom_frontend(crop)  # (B, 1, 256, 300)   5 ms frames
-        zoom_input = self.coord(zoom_spectrogram)  # (B, 2, 256, 300)   + frequency coordinate
+        zoom_spectrogram = self.zoom_frontend(crop)  # (B, 1, 256, 360)   5 ms frames
+        zoom_input = self.coord(zoom_spectrogram)  # (B, 2, 256, 360)   + frequency coordinate
         zoom_map = self.zoom_cnn(zoom_input)  # (B, 96, 16, 38)
         zoom_series = self.fold(zoom_map)  # (B, 1536, 38)
         zoom_series = self.zoom_proj(zoom_series)  # (B, 128, 38)

@@ -7,11 +7,11 @@
 # **Question.** Semi-supervised training inside the main loop is worth more than separate
 # pretraining at this scale.
 #
-# **Status:** running (from the research session). In progress on 2026-11-23 (first attempt
-# crashed at epoch 10 on an exhausted loader; fixed). Fold 0/1 outer F1 after 20 epochs: 0.80 /
-# 0.76, i.e. inside the fold-to-fold spread of R2. Review caveat: the pseudo-labels come from the
-# model itself, 78 % of unlabelled passive songs are predicted Unfinished, and BirdCLEF teams
-# found weak self-teachers hurt.
+# **Status:** done (from the research session). 5 folds: macro-F1 0.775 (R2: 0.774), difference
+# -0.001 [-0.015, +0.013]. R2 is ahead on BhBl (+0.035) and BlBh (+0.051) recall; expert bird-level
+# accuracy 0.924 (R2: 0.939). FixMatch gives no gain at this scale and was not adopted (research log
+# 17.5). The review caveat explains why: the pseudo-labels come from the model itself. Retry only
+# with a strong teacher (distill_function_matching.py).
 #
 # Run from the repository root with `python -m experiments.r4_fixmatch`, or step through the cells
 # in an editor / Jupyter whose working directory is the repository root. Training writes to

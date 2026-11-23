@@ -16,6 +16,9 @@
 | Run comparison | `evaluation/compare_runs.py r2_s0 base_v3` | reproduces +0.029 [+0.012, +0.046] |
 | ONNX export and the service pipeline | `r2_s0/fold0` exported (6.3 MB), `tests/check_serving.py` on a held-out Vizina recording | ONNX vs PyTorch 7e-7; 12 of 16 annotated songs found, all labelled correctly; silence and sub-window clips handled |
 | Static check | `tests/check_names.py` | 0 undefined names / broken imports |
+| Song events, weak and unlabelled tables | built from the real song index with `processing/song_events.py`, `build_weak_set.py`, `build_unlabeled.py` | identical to the research session's `song_events.parquet`, `weak_v5.csv` and `unlabeled_v4.csv` |
+| Loader repairs (padding, digital silence) | `processing/audio_repair.py` through `training.data.load_seg` against the research loader on 240 real windows | identical samples |
+| TFLite export | `serving/export_tflite.py` on `r2_s0/fold0`, then `tests/check_tflite.py` on 200 clips | float32 and float16: same class as PyTorch on every clip; int8: 99.5 % |
 
 ## Not run (written or moved; compiles; static check passes)
 
@@ -48,7 +51,9 @@
 |---|---|
 | `data/noise_bank_clean.npy` | `python -m processing.clean_noise_bank --model runs/r2_s0`, then look at `figs/qa/noise_bank_dropped.png` |
 | folds without duplicate recordings | `python -m processing.make_folds --table data/orig_aligned.csv --dedupe` (changes the folds: old and new runs are then not comparable) |
-| tables with song spans (frame targets) | re-run `processing/build_weak_set.py`, `build_jcu_set.py` |
+| `data/song_events.parquet` | `python -m processing.song_events` (exists in the workspace; rebuild after the song index changes) |
+| weak table with song spans (frame targets, ending-referenced noise) | `python -m processing.build_weak_set data/weak_v5.csv`: the same rows as the research table plus `song_t0` / `song_t1`. On the CPU server write to another name while the research jobs read `weak_v5.csv`. `build_jcu_set.py` for the JCU tables |
+| `data/unlabeled_v4.csv` | `python -m processing.build_unlabeled` (exists in the workspace) |
 | `data/species_bank.npy` | `python -m processing.build_species_bank` |
 | `data/orig_aligned_disputed.csv` | `python -m processing.build_disputed base_v3 r1_s0 r2_s0` |
 | Perch embeddings for weak tables | `processing/extract_foundation_emb.py` (TensorFlow environment) |
@@ -74,7 +79,11 @@ Found while rewriting `augment/` and `losses/`; none affects a finished result.
   must be checked first).
 - A recording -> observer table for observer-grouped folds.
 - Unpadded originals of the BirdNET-app clips (source shortcut, review item 11).
-- TFLite export for phones (ONNX only; `onnx2tf` plus a parity check would be the next step).
+- Full-integer (int8) quantisation with a calibration set, and latency on a real phone. The
+  float16 TFLite export exists and is checked (`serving/export_tflite.py`).
+- A learned detector for the end of a song. The energy rule often stops at the B element; the
+  1.1 s tail kept by `processing/song_events.py`, `serving/pipeline.py` and `model/ending_zoom.py`
+  is a patch (research log 17.4).
 
 ## Removed from the repository (all in git history)
 

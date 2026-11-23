@@ -1,6 +1,7 @@
 """Visual QA contact sheets of exactly what the model sees (LogMel 1.5-11 kHz, 128 bins, median-normalised, 4 s).
 sheets: strong (per class), weak, jcu, cf (counterfactual surgery), aug (training augmentations of the same clips),
-errors (R2 OOF confusions), jcu_pred (JCU test songs by predicted class).  Usage: qa_sheets.py <sheet> [seed]"""
+errors (R2 OOF confusions), jcu_pred (JCU test songs by predicted class), rescored (songs admitted by the onset
+re-scoring), moved (windows shifted by processing/song_events.py).  Usage: qa_sheets.py <sheet> [seed]"""
 
 import sys, os, numpy as np, pandas as pd, torch, matplotlib
 
@@ -67,7 +68,7 @@ if sheet == 'strong':
     ]
     grid(it, f'strong_s{seed}', ncol=3)
 elif sheet == 'weak':
-    d = rd(f'{WS}/data/weak_v3.csv')
+    d = rd(f'{WS}/data/weak_v5.csv')
     d = d.sample(16, random_state=seed)
     grid(
         [(mel(clip(r)), f'{r.label[:22]} {r.source} w{r.w:.1f}') for r in d.itertuples()],
@@ -165,6 +166,30 @@ elif sheet in ('align', 'unf_cut'):
                 )
             )
     grid(it, f'{sheet}_s{seed}', ncol=4)
+elif sheet == 'rescored':
+    # songs admitted only by the onset re-scoring (processing/rescore_yh.py): are they real, complete songs?
+    S = pd.read_parquet(f'{WS}/data/song_index.parquet')
+    S = S[(S.yh_grid3 < 0.3) & (S.yh >= 0.3) & ((S.seg_t1 - S.seg_t0) <= 3.8) & (S.seg_t0 >= 0.6)]
+    S['b'] = pd.cut(S.yh, [0.3, 0.5, 0.8, 1.01], right=False)
+    d = S.groupby(['source', 'b'], observed=True).sample(3, random_state=seed, replace=False)
+    it = []
+    for r in d.itertuples():
+        title = f'{r.source[:8]} yh {r.yh_grid3:.2f}->{r.yh:.2f} {r.weak.split("|")[0]}'
+        it.append((mel(load_seg(r.npy, r.seg_t0 - 0.6, r.seg_t0 + 3.4, N)), title))
+    grid(it, f'rescored_s{seed}', ncol=3)
+elif sheet == 'moved':
+    # windows that processing/song_events.py shifted away from the default: is the whole song still in view?
+    E = pd.read_parquet(f'{WS}/data/song_events.parquet')
+    E = E[E.moved & ~E.borrowed & (E.yh >= 0.3) & (E.source != 'birdnet_yh')]
+    it = []
+    for r in E.sample(12, random_state=seed).itertuples():
+        S = mel(load_seg(r.npy, r.win_t0, r.win_t0 + 4, N))
+        fps = S.shape[1] / 4.0
+        # bright bar along the bottom = the detected event
+        first, last = int(max(0, r.seg_t0 - r.win_t0) * fps), int(min(4, r.seg_t1 - r.win_t0) * fps)
+        S[:4, first:last] = S.max()
+        it.append((S, f'{r.source[:6]} shift {r.win_t0 - (r.seg_t0 - 0.6):+.2f}s yh{r.yh:.2f}'))
+    grid(it, f'moved_s{seed}', ncol=3)
 elif sheet == 'errors':
     import glob
 

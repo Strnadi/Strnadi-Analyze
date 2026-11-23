@@ -26,7 +26,9 @@ def check(run, fold=0, n=48):
     table = read_table('data/orig_index.csv')
     rows = table.loc[z['idx'][:n]]
     X = peak_normalize(
-        np.stack([load_seg(r.npy, r.t0, r.t0 + 4, 128000) for r in rows.itertuples()])
+        np.stack(
+            [load_seg(r.npy, r.t0, r.t0 + 4, 128000, raw=True) for r in rows.itertuples()]
+        )  # raw: the loader those stored predictions were made with
     )
     m = load_model(f'{d}/model.pt')
     with torch.no_grad():

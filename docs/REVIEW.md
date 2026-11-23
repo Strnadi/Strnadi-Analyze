@@ -42,6 +42,10 @@ Numbers are recording-grouped 5-fold CV on the 3,744 human-labelled clips unless
 | 17 | Vizina "held-out males" and JCU "held-out recorders" are not independent of weak training data (neighbours within 200 m, shared territories, recorders 120-170 m apart) | documented in `evaluation/post_eval.sh` output and the experiment files. **Not fixed** |
 | 18 | 225 of 464 Vizina test "Unfinished" songs are first-phrase-only, which training treats as ambiguous | documented. **Not fixed** |
 | 19 | Disputed clips trained as hard dialect labels | `processing/build_disputed.py` + `experiments/disputed_as_candidates.py` (stop-gap until expert relabelling) |
+| 20 | The song detector often ends a song at the B element; the quiet terminal C / E follows 0.3-1.1 s later. Windows, crops and tests placed relative to the detected end lose it (found by the research session, log 17.4) | `processing/song_events.py` keeps 1.1 s after the end in every training crop; `serving/pipeline.py` starts long songs' windows later; `model/ending_zoom.py` crops to 1.2 s after the end. A patch: a learned end-of-song detector is still missing |
+| 21 | About 11 % of weak-label windows cut a neighbouring song; BirdNET scores borrowed from the next song (research log 17.1-17.2) | `processing/song_events.py`; tables `weak_v5`, `unlabeled_v4` (reproduced exactly with this code) |
+| 22 | Digital silence and near-silent padding in the model input (research log 17.3) | `processing/audio_repair.py`, used by the loader and by the service |
+| 23 | `onnx2tf` overwrites the ONNX file it converts with a one-clip graph, which the backend cannot run in batches | `serving/export_tflite.py` converts a copy; `tests/check_tflite.py` checks the result |
 
 Legacy code defects fixed in the port: SpecAugment masked to 0 dB (the loudest value after colour mapping) with
 one mask per batch; ImageNet backbones fed un-normalised input; random by-file splits with a time-seeded split

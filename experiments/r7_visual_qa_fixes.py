@@ -8,11 +8,12 @@
 # **Question.** Many R2 "errors" were clips starting mid-song or zero-padded; clean windows and
 # clean synthetic data beat R2.
 #
-# **Status:** queued (from the research session). Not finished on 2026-11-23. Audit caveats for
-# reading it: its evaluation windows differ from R2's, so the two are only comparable after re-
-# scoring R2 on the aligned windows (evaluation/compare_runs.py now refuses mixed tables); ~19
-# moved "Unfinished" windows may now contain an ending the labeller never saw; BirdNET-app clips
-# stay unaligned, so window placement correlates with class.
+# **Status:** running (from the research session). Started 2026-11-23 on weak_v5 (clean window
+# placement, research log 17.2) with the repaired loader (17.3). Compare it with R2 re-scored on the
+# same windows, macro-F1 0.770 (17.7), not with 0.774. Caveats: 23 moved "Unfinished" windows now
+# show a terminal element the labeller never saw (results/expert_audit.csv); the noise bank still
+# contains Yellowhammer songs; BirdNET-app clips stay unaligned, so window placement correlates with
+# class.
 #
 # Run from the repository root with `python -m experiments.r7_visual_qa_fixes`, or step through
 # the cells in an editor / Jupyter whose working directory is the repository root. Training writes
@@ -31,7 +32,7 @@ settings = TrainSettings(
     # data
     labelled_table='data/orig_aligned.csv',
     extra_tables={
-        'data/weak_v3.csv': 0.35,
+        'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
         'data/vizann_v1.csv': 0.07,
     },

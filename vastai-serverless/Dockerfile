@@ -11,7 +11,7 @@ RUN . /venv/main/bin/activate && pip install --no-cache-dir -r /opt/strnadi/requ
 
 COPY config.py runner.py /opt/strnadi/
 COPY serving /opt/strnadi/serving
-COPY processing/__init__.py processing/segment.py /opt/strnadi/processing/
+COPY processing/__init__.py processing/segment.py processing/audio_repair.py /opt/strnadi/processing/
 COPY vastai-serverless/main.py vastai-serverless/make_benchmark_samples.py vastai-serverless/start.sh /opt/strnadi/vastai/
 
 ARG HOST_MODEL_PATH=model.onnx

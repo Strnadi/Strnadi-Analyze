@@ -17,4 +17,5 @@ openpyxl
 umap-learn
 # optional, only for specific processing scripts:
 #   tensorflow-cpu + kagglehub   processing/extract_foundation_emb.py (frozen Perch 2.0 embeddings, TF SavedModel)
-#   ai-edge-litert               processing/run_birdnet_corpus.py, jcu_pipeline.py (BirdNET 2.4), evaluation of the old .tflite model
+#   ai-edge-litert               processing/run_birdnet_corpus.py, jcu_pipeline.py (BirdNET 2.4), evaluation of the old .tflite model, tests/check_tflite.py
+#   onnx2tf + tensorflow         serving/export_tflite.py (a separate environment is fine: it imports nothing else)

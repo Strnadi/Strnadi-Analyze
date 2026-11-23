@@ -1,6 +1,6 @@
 # Continuation notes for the next agent (GPU server)
 
-State as of 2026-11-23, about 15:00 UTC. Written at the end of the session that restructured the
+State as of 2026-11-23, about 17:30 UTC. Written at the end of the session that restructured the
 repository. Read this file first, then `docs/REVIEW.md` (findings) and `docs/STATUS.md` (what is
 verified). `docs/RESEARCH_LOG.md` is the research session's own experiment log, section by section.
 
@@ -59,8 +59,14 @@ What the project owner has asked for, across all sessions (treat as standing ins
 - **Only one training change has a significant measured gain:** the factorised head (R2).
 - **Nothing has been trained with the code in this repository.** It is a verified port and
   rewrite of the research code plus new, untrained proposals.
-- **The research session's jobs are still running on the CPU server** from its own untracked code
-  (`research/`), unaware of the review findings.
+- **The song detector stops too early.** Found by the research session on the afternoon of
+  2026-11-23: the detected song end is often the B element, and the quiet terminal C / E element of
+  BC / BE songs follows 0.3-1.1 s later. Anything cut relative to the detected end (training
+  windows, crops, serving windows, masking tests) can turn a complete song into "Unfinished". Its
+  fixes are ported to this branch (section 3a, "Afternoon round").
+- **The research session is active again on the CPU server** (resumed 14:51 UTC), training from its
+  own untracked code (`research/`). It has not been told about the review findings, but found
+  some of them itself.
 
 ---
 
@@ -86,11 +92,18 @@ recomputed from the stored predictions with `python -m tools.project_state`):
 | r1_s0 | + weak pools, flat head | 5 | 0.754 | 0.50 | 0.53 | 0.80 / 0.85 |
 | **r2_s0** | + factorised head | 5 | **0.774** | 0.55 | 0.65 | 0.83 / 0.89 |
 | r5_s0 | R2 + hard negatives + codecs | 5 | 0.761 | 0.51 | 0.59 | 0.82 / 0.87 |
-| r4_s0 | R2 + FixMatch | 4 of 5 | 0.779 (folds 0-3) | 0.52 | 0.62 | 0.81 / 0.88 |
-| r6_s0 | R2 + JCU weak pool | 1 of 5 | 0.775 (fold 0) | 0.47 | 0.75 | 0.81 / 0.86 |
+| r4_s0 | R2 + FixMatch | 5 | 0.775 | 0.51 | 0.59 | 0.81 / 0.87 |
+| r6_s0 | R2 + JCU weak pool | 3 of 5 | 0.780 (folds 0-2) | 0.51 | 0.74 | 0.81 / 0.89 |
+| r7_s0 | R2 + visual-QA fixes, `weak_v5` | 0 of 5 | training | | | |
 
-R2 vs base: +0.029 [+0.012, +0.046] (paired recording bootstrap; seed variance not included).
-R2 on the same folds alone is about 0.78, so R4 and R6 show no gain so far.
+Paired recording bootstrap against R2 (seed variance not included):
+
+- R2 vs base: +0.029 [+0.012, +0.046].
+- R4 vs R2: -0.001 [-0.015, +0.013]; R2 is ahead on BhBl and BlBh recall. FixMatch not adopted.
+- R5 vs R2: -0.013, P(R2 better) 0.95. None recall +0.048, dialects worse. Hard negatives to be
+  retried at a lower share.
+- R6: R2 on folds 0-2 alone is about 0.78, so no gain so far.
+- R2 re-scored on the re-aligned windows R7 is evaluated on: **0.770**. Compare R7 with that.
 
 Other measured facts:
 
@@ -102,28 +115,67 @@ Other measured facts:
   per minute (production logic: 0.774, 0.68).
 - Expert bird-level BE/BlBh test (332 birds): R2 0.939, base 0.893, the NCS file labels 0.863.
 - NCS bird-level accuracy of base_v3: 0.957 at 0.89 coverage.
-- Label-free pretraining from scratch: linear-probe macro-F1 0.32 (`ssl_v2`) after 4,000 of 12,000
-  steps and ~6 CPU hours, 0.39 (`ssl_hub`) after 2,000 (supervised: 0.745; frozen Perch: 0.66). As both reviews
-  predicted, it is a poor use of compute next to a pretrained teacher.
+- Label-free pretraining from scratch: linear-probe macro-F1 0.34 (`ssl_v2`) and 0.37 (`ssl_hub`)
+  after 6,000 of 12,000 steps (supervised from scratch: 0.745; frozen Perch: 0.66).
+  As both reviews predicted, it is a poor use of compute next to a pretrained teacher.
+- Recording level (covered NCS recordings): R4 0.970, base_v3 0.957; BlBh recall 0.88 vs 0.81.
+- Calibration: temperature scaling does not help the factorised head (its output is a product of
+  probabilities). Conformal sets at 90 % coverage give a single class for 92 % of clips with R2
+  (88 % for the baseline). Use conformal sets or per-class thresholds in production, not the
+  backend's fixed 70 % confidence cut.
 - Parked: rule-based labelling from an element tracker (0.52 macro-F1, parser too noisy);
   bag-of-units VQ tokens (carry no dialect information without sequence modelling).
 
-**What was running on the CPU server at the time of writing:** R4 fold 4, R6 fold 1, `ssl_v2`,
-`ssl_hub`, JCU download batch 2. **Queued behind them:** R7 (R2 + visual-QA fixes), the
-8-architecture sweep, `ssl_mae`, `ssl_ae`, second seeds of R2 / R1 / base, R3 (far-field), the
-identity model. The session itself had been idle for three hours, waiting for R7, and had been
-compacted twice.
+**Afternoon round (2026-11-23, research log section 17).** The session resumed at 14:51 UTC and,
+again by looking at spectrograms, found and fixed the following. All of it is ported to this branch
+and checked against that session's own outputs (section 3c).
 
-**Read its results with these caveats** (found by the reviews; the research session was never told):
+- **Borrowed BirdNET scores.** Re-scoring rejected segments with three onset windows admitted 7,784
+  more songs, but for about a fifth of them the score belonged to the *next* song. Dropped.
+- **Windows that cut a neighbour.** About 11 % of the weak-label windows cut another song at their
+  edge. `processing/song_events.py` now merges segments into events and places each 4.4 s window
+  so that no song is cut, the song is inside every 4 s training crop, and at least 1.1 s follows
+  the detected end where possible. New tables: `weak_v5.csv` (50,788 rows; v3 had 47,773) and
+  `unlabeled_v4.csv` (75,427). Only half of the `birdnet_yh` excerpts can be placed.
+- **Artificial silence.** Short files were padded with near-silence (a dark block after 41 % of
+  BirdNET excerpts), and 72 % of Vizina / 29 % of NCS files contain runs of digital zeros. The
+  loader now fills both with noise shaped like the recording's own background.
+- **A correction of its own earlier claim.** It had reported that R2 "leans on context outside the
+  song". With the terminal element kept inside the "song" region the opposite holds: with the song
+  replaced by background, R2 answers None 90 % of the time (baseline 48 %) and gives the right
+  dialect 7 % of the time (baseline 34 %); about 8 % of its errors are context-driven. The idea
+  of mixing other species into the background (R8) moved down the list.
+- **Re-aligned labels.** On the re-aligned windows 23 of 1,693 moved "Unfinished" clips are now
+  called a dialect: the new window shows the terminal element the old clip cut off. They are in
+  `results/expert_audit.csv` (144 rows, with 121 clips cut at an edge).
+- **Phone export.** R2 converts to a 3.3 MB float16 TFLite file with the same predicted class as
+  PyTorch on every test clip. Int8 (2.0 MB) changes 1.5 % of predictions and needs calibration.
+- **Production backend audit** (branch `main`, read only): the last windows of every recording are
+  zero-padded; training peak-normalises but inference does not; `fullPredictions` in the API
+  response is always empty (a consumed `zip`); windows sit on a fixed 0.5 s grid. Nothing was
+  changed on `main`. This branch replaces that runner (`serving/pipeline.py`).
 
-- Every run that mixes noise used a noise bank that contains Yellowhammer songs.
-- R1-R6 trained on the black-patch counterfactual filler and clip-power SNR; R7 fixes those.
-- R7's evaluation windows differ from R2's; compare only after re-scoring R2
-  (`evaluation/rescore_oof.py`). Its architecture sweep trains pretrained backbones at the
-  from-scratch learning rate, on 3 folds and one seed: it cannot resolve differences below ~0.03.
+**Running on the CPU server at 17:30 UTC:** R6 folds 3-4, R7 folds 2-3 (folds 0-1 re-queued; all
+on `weak_v5`), `ssl_v2`, `ssl_hub`, JCU download batch 2 (620 of 1,347 files at 16:27).
+**Queued:** the 8-architecture sweep and R3 (far-field), both switched to `weak_v5`; `ssl_mae`,
+`ssl_ae`; second seeds of R2 / R1 / base; the identity model.
+
+**Read its results with these caveats** (found by the reviews; the research session has not been
+told, and nothing it did in the afternoon addresses the first four):
+
+- Every run that mixes noise, R7 included, uses a noise bank that contains Yellowhammer songs.
+- Label noise: the disputed clips are still trained and scored as labelled.
+- The source shortcuts (BirdNET-app clips are never Unfinished; passive recorders are BhBl-only).
 - Vizina "held-out males" and JCU "held-out recorders" are not independent of the weak training
   data used from R1 / R6 on (neighbouring territories, recorders 120-170 m apart).
-- Its exporter has the batch-size bug fixed here (section 3c).
+- R1-R6 trained on the black-patch counterfactual filler, clip-power SNR, windows that cut
+  neighbouring songs and the old padding. R7 changes all of these at once, together with the
+  re-aligned labelled clips, so a difference between R7 and R2 cannot be attributed to one fix.
+- Its architecture sweep trains pretrained backbones at the from-scratch learning rate, on 3 folds
+  and one seed: it cannot resolve differences below ~0.03.
+- Its exporter had the batch-size bug in the factorised head; it found and fixed it too.
+- `onnx2tf` overwrites the ONNX file it converts with a graph fixed to one clip. If its ONNX
+  export is meant for the backend, it must be re-exported after the TFLite conversion.
 
 **Still open from that session, and only a human can unblock them:**
 
@@ -175,6 +227,25 @@ Then it produced this branch (`pytorch-restructure`, on top of `main`):
 - Verified: research checkpoints reproduce their stored predictions in the refactored models
   (max difference 5e-5); every rewritten file equals its predecessor numerically; all trainer paths
   run on synthetic data; a short real-data training run; export and service on a real recording.
+
+Later the same day it took in the research session's afternoon round:
+
+- `processing/song_events.py`, `build_weak_set.py`, `build_unlabeled.py`: run on the real song
+  index, they reproduce that session's `song_events.parquet`, `weak_v5.csv` and `unlabeled_v4.csv`
+  exactly (this branch's weak table also carries the song span, `song_t0` / `song_t1`).
+- `processing/audio_repair.py`, used by the loader and by the service: identical samples to the
+  research loader on 240 real windows. `load_seg(..., raw=True)` is the old behaviour, needed to
+  reproduce stored predictions.
+- `evaluation/explain.py context`, two new QA sheets, the flip report in
+  `evaluation/rescore_oof.py`.
+- `serving/export_tflite.py` and `tests/check_tflite.py`: run on R2 fold 0 (float32 and float16
+  agree with PyTorch on all 200 clips; int8 on 99.5 %). The converter gets a copy of the ONNX
+  file, because `onnx2tf` overwrites its input.
+- The same "detected end is often B" problem existed in two places here and is fixed: the service
+  now starts a long song's windows late enough to keep 1.1 s after the detected end, and
+  `model/ending_zoom.py` crops 0.6 s before to 1.2 s after it (was 1.0 / 0.5).
+- Experiments on the corrected data now use `weak_v5` / `unlabeled_v4`; finished research runs
+  keep the tables they were trained on.
 
 Not done there: any full training; execution of most relocated data scripts; the Perch and
 EfficientAT wrappers against the real downloads; Docker builds. See `docs/STATUS.md`.
@@ -239,13 +310,15 @@ Key tables in `data/`:
 |---|---|---|
 | `orig_index.csv` | 4,089 | labelled 4 s clips with folds (`aug` copies excluded: 3,744 used) |
 | `orig_aligned.csv` | same rows | the same clips re-cut around the whole song (R7 onward) |
-| `weak_v3.csv` | 47,773 | songs with candidate-set labels from file / site labels, plus None windows |
+| `weak_v5.csv` | 50,788 | songs with candidate-set labels from file / site labels, plus None windows; clean window placement. Rebuild with `processing/build_weak_set.py` to add the song span |
+| `weak_v3.csv` | 47,773 | the earlier version with fixed windows: what R1-R6 trained on |
+| `song_events.parquet` | 173.7k | song events with their window placement (`win_t0`, `moved`, `borrowed`) |
 | `cf_v3.csv`, `cf_v4.csv` | 1,188 | counterfactual songs (swap -> BlBh, truncations -> Unfinished); v4 has the fixed filler |
 | `vizann_v1.csv` | 1,598 | annotated Vizina songs of training males |
 | `jcu_train.csv`, `jcu_test.csv` | 41.7k / 12.9k | JCU songs, 28 / 7 recorders |
 | `hardneg_v1.csv` | 6,865 | other-species windows |
-| `unlabeled_v2.csv` | 77.5k | songs for semi-supervised training |
-| `song_index.parquet`, `none_index.parquet` | ~180k | every detected segment with source, fold, split, BirdNET score |
+| `unlabeled_v4.csv` | 75.4k | songs for semi-supervised training (`unlabeled_v2.csv`, 77.5k, is what R4 used) |
+| `song_index.parquet`, `none_index.parquet` | ~180k | every detected segment with source, fold, split, BirdNET score (`yh`: best of the grid and the onset re-score; `yh_grid3`: the grid score) |
 | `vizina_eval.csv`, `vizina_files.csv` | | held-out-male test set; file -> male mapping |
 | `noise_bank_audiomoth.npy` | 1,212 x 6 s | background noise. **Contaminated with songs: rebuild** |
 | `farfield_stats.csv` | | level / SNR by distance from the BioDCASE 2025 playback data |
@@ -255,9 +328,13 @@ BlBh 79. External, public: BioDCASE 2025 Task 3 Yellowhammer data (Zenodo 152283
 measurements of Diblikova et al. 2023 (Zenodo 8092674; its song-time column is a 6.000 s placeholder
 in 384 of 430 rows).
 
+Also in the workspace: `results/expert_audit.csv` (144 labelled clips whose window is known to
+be wrong for their label) and `figs/qa/`, `figs/explain/` (the sheets the research session judged
+its fixes by).
+
 **Rebuild before training anything new** (commands in `docs/STATUS.md`): the clean noise bank
-(and look at the sheet it writes), folds without duplicate recordings, tables with song spans, the
-species bank, the disputed-clip table, Perch embeddings for the weak tables.
+(and look at the sheet it writes), folds without duplicate recordings, the weak table with song
+spans, the species bank, the disputed-clip table, Perch embeddings for the weak tables.
 
 ---
 
@@ -267,7 +344,8 @@ The GPU changes what is sensible. On the CPU server a recipe took 15-20 fold-hou
 comparison can be 5 folds x 3 seeds, and large pretrained encoders can be fine-tuned.
 
 1. **Honest measurement first.**
-   - Expert adjudication of the disputed clips (`processing/build_disputed.py` writes the list);
+   - Expert adjudication of the disputed clips (`processing/build_disputed.py` writes the list)
+     and of the 144 clips in `results/expert_audit.csv`;
      a ~500-clip gold test set labelled by two or three experts, with the protocol "label what is in
      the window; record the bird's dialect separately". Until then train disputed clips as
      candidate sets (`experiments/disputed_as_candidates.py`).
@@ -287,8 +365,11 @@ comparison can be 5 folds x 3 seeds, and large pretrained encoders can be fine-t
    (`experiments/distill_function_matching.py`).
 6. **Detector and end-to-end.** A learned frame-level song detector; whole-recording evaluation;
    bird-level aggregation with abstention as the product metric.
-7. **Deploy.** ONNX export with the parity checks, a TFLite build for the phone with the same
-   checks, latency on a real device, the service pipeline on phone recordings.
+7. **Deploy.** ONNX for the backend and float16 TFLite for the phone, both with parity checks
+   (`serving/export_onnx.py`, `serving/export_tflite.py`, `tests/check_tflite.py`; verified on x86
+   with R2). Still to do: latency on a real phone, full-integer quantisation with a calibration
+   set, the service pipeline on phone recordings, conformal sets or per-class thresholds in place
+   of one confidence cut.
 8. **BioAcu** on top of the winning encoder: per-project heads, few-shot curves, a fixed 2-D map,
    open-set flags. Do not start it before step 5 is done.
 
@@ -324,7 +405,8 @@ completeness AUC, not on species-style accuracy.
 
 - `layers/multires_frontend.py` + `model/strnadnet_tonal.py`: 16 / 32 / 128 ms windows as channels,
   long horizontal kernels in the stem, percentile noise floor.
-- `model/ending_zoom.py`: coarse network + a 27 Hz / 5 ms network on the 1.5 s around the song end.
+- `model/ending_zoom.py`: coarse network + a 27 Hz / 5 ms network on the 1.8 s around the song end
+  (0.6 s before the detected end to 1.2 s after it, so that a late terminal element is inside).
 - `layers/freq_dynamic_conv.py` + `model/fdy_crnn.py`; `layers/ridge_contour.py` +
   `model/contour_tcn.py` (sub-bin pitch contour).
 - Front-end ablations: `experiments/frontend_{percentile_floor,pcen,linear_hires,multires}.py`.
@@ -338,7 +420,7 @@ completeness AUC, not on species-style accuracy.
   superlets, multitaper estimates, or a constant-Q transform with 48-96 bins per octave over
   2-10 kHz. All are fixed front-ends: one ablation each.
 - **Fine-patch transformer on the zoom crop.** A ViT with tall, thin patches (about 4 frequency x 2
-  time bins) on the 1.5 s ending crop only, initialised from a pretrained audio ViT with
+  time bins) on the 1.8 s ending crop only, initialised from a pretrained audio ViT with
   interpolated patch embedding. The crop keeps the token count small.
 - **Relational head for the last two elements.** Dialects such as BhBl vs BlBh are a comparison
   (which element is higher). Encode the two terminal elements separately and classify from their
@@ -349,6 +431,12 @@ completeness AUC, not on species-style accuracy.
   first phrases at controlled levels from +10 to -25 dB relative to the phrase, with soft labels
   near the audibility limit. This yields unlimited exact supervision for the one decision that
   fails, and a psychometric curve (detection vs level) as an evaluation.
+- **Stop trusting the energy rule for the end of a song.** The afternoon finding (the detector
+  ends at B, the C / E element comes up to 1.1 s later and is below its threshold) is the same
+  failure as the classifier's, one stage earlier. The 1.1 s tail is a patch. The fix is a learned
+  detector of terminal elements: the pasted-element detector above, or the CTC tagger of 7D,
+  should define where a song ends, for cutting, for the zoom crop and for the frame targets
+  (`song_t1` currently ends at B for those songs).
 
 ### D. Element sequences without frame labels
 
@@ -432,6 +520,14 @@ of complete with unfinished songs). The JCU archive finally has a use here.
   the false positives of a 0.5 s grid.
 - An exported graph must be checked at a batch size other than the traced one.
 - One seed and a bootstrap over recordings does not include training-seed variance.
+- The song detector's end is often the B element. Whatever cuts audio relative to the detected
+  end must keep about 1.1 s after it, or BC / BE songs become "Unfinished". A masking test that
+  ignored this produced a wrong conclusion about the model for half a day.
+- Digital silence is a cue: zero padding, decoder delay, near-silent padding. The loader and the
+  service fill it; anything new that pads audio must use `processing/audio_repair.py`.
+- A BirdNET score at one song's onset can belong to the next song (its window reaches 3 s ahead).
+- `onnx2tf` overwrites the ONNX file it is given. Convert a copy.
+- Temperature scaling does not calibrate the factorised head.
 - This repository is public: no share links, tokens, server paths or private correspondence in
   commits. `processing/jcu_nas.py` reads its access details from the environment for that reason.
 
@@ -443,7 +539,8 @@ of complete with unfinished songs). The JCU archive finally has a use here.
 2. Export of confirmed segments from the app database (recording, interval, dialect, device).
 3. Expert time: the disputed clips and a gold test set. Should a labelling page be built?
 4. Should the research session on the CPU server be told about the review findings, or stopped?
-   Its queued jobs (R7, the architecture sweep, the pretraining runs) repeat known defects.
+   It is active again and fixing data defects it finds itself, but R7 and the queued architecture
+   sweep still use the contaminated noise bank and the disputed labels.
 5. May the folds be rebuilt without duplicate recordings? Old and new runs are then not comparable.
 6. The key from Vizina phrase types / components to the element names B, C, D, E, X.
 7. A recording -> observer table (for observer-grouped folds).
@@ -464,6 +561,9 @@ of complete with unfinished songs). The JCU archive finally has a use here.
 | Which experiments exist, and their status? | `python -m tools.list_experiments` |
 | State of the runs in a workspace? | `python -m tools.project_state` |
 | Evaluation, plots, error sheets | `evaluation/report.py` |
+| Song events and window placement | `processing/song_events.py` |
+| Padding and digital silence | `processing/audio_repair.py` |
+| Export for backend and phone | `serving/export_onnx.py`, `serving/export_tflite.py`, `tests/check_tflite.py` |
 | Findings and what was fixed | `docs/REVIEW.md` |
 | What is verified, what is not; data to rebuild | `docs/STATUS.md` |
 | The research session's log | `docs/RESEARCH_LOG.md` |

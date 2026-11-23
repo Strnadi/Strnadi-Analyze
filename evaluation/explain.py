@@ -11,6 +11,14 @@ patch <run[,run...]>
   shortcut test for the cf_v3 black-patch artefact: complete, correctly classified dialect songs get 0.5 s right
   after the song end attenuated by -12 dB / -20 dB (5 ms fades) vs. an untouched control -> change of P(Unfinished)
   and of the predicted class.  A model that learned 'dark patch = Unfinished' shifts; one that reads the song does not.
+context <run[,run...]>
+  context dependence: OOF song clips (all errors + equal number of correct, dialect/Unfinished labels) re-scored with
+  (a) everything outside [onset-0.15, end+POST] replaced by the clip's own background-matched noise ('song only') and
+  (b) the song replaced by background ('context only').  Accuracy of each variant, and how many errors are fixed /
+  correct clips broken by removing the context -> context-driven errors (other birds, second songs) vs. song-driven.
+  POST (env CTX_POST, default 1.2 s) must cover the terminal element: the segmenter's song end is often the B
+  element, and BC's C / BE's E follow it by 0.3-1.1 s.  With POST = 0.35 the test wrongly showed R2 leaning on context.
+  -> results/explain_context_<run>.{csv,json} + figs/explain/<run>_context.png (control | song only | context only)
 """
 
 import os, sys, json, glob, numpy as np, pandas as pd, torch, torch.nn.functional as F, matplotlib
@@ -18,7 +26,7 @@ import os, sys, json, glob, numpy as np, pandas as pd, torch, torch.nn.functiona
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from config import CLASSES, C2I, WS
-from training.data import load_seg
+from training.data import load_seg, background_noise
 from training.checkpoint import load_logits_model as load_torch_model
 from processing.segment import segment_songs
 
@@ -27,13 +35,15 @@ SR, N, HOP = 32000, 128000, 320
 DIA = ['BC', 'BE', 'BhBl', 'BlBh', 'XB']
 OUT = f'{WS}/figs/explain'
 os.makedirs(OUT, exist_ok=True)
+# seconds kept after the detected song end in the context test (terminal C / E elements follow B by 0.3-1.1 s)
+POST = float(os.environ.get('CTX_POST', 1.2))
 
 
 def norm(y):
     return (y / max(np.abs(y).max(), 1e-6) * 0.5).astype(np.float32)
 
 
-def song_span(y):
+def song_span(y, faint=True):
     segs, _ = segment_songs(y, hi=10, lo=4, max_gap=0.3, min_dur=0.3, max_dur=6.0)
     ev = []
     for s0, s1, _ in segs:
@@ -42,9 +52,18 @@ def song_span(y):
         else:
             ev.append([s0, s1])
     ev = [e for e in ev if e[1] - e[0] >= 0.3]
-    return (
-        (min(e[0] for e in ev), max(e[1] for e in ev)) if ev else None
-    )  # union of tonal events (the longest one often missed phrase or ending)
+    if not ev:
+        return None
+    # union of tonal events (the longest one often missed phrase or ending)
+    s0, s1 = min(e[0] for e in ev), max(e[1] for e in ev)
+    # faint short terminal elements (BC's C: quiet ~0.2 s whistle 0.3-1 s after B) are below hi / min_dur: extend the
+    # end with low-threshold elements that follow within 1.0 s.  This catches only some of them (research log 17.4).
+    if faint:
+        fs, _ = segment_songs(y, hi=6, lo=3, max_gap=0.1, min_dur=0.06, max_dur=1.0)
+        for a_, b_, _ in sorted(fs):
+            if s1 - 0.05 < a_ <= s1 + 1.0 and b_ - s0 <= 4.0:
+                s1 = max(s1, b_)
+    return s0, s1
 
 
 def fmodel_parts(m):
@@ -293,8 +312,124 @@ def run_patch(runs):
     json.dump(res, open(f'{WS}/results/explain_patch_{"+".join(runs)}.json', 'w'), indent=1)
 
 
+def strong_table(run):
+    """the labelled table a run was evaluated on (stored with its out-of-fold predictions)"""
+    for f in sorted(glob.glob(f'{WS}/runs/{run}/fold*/oof.npz')):
+        z = np.load(f, allow_pickle=True)
+        if 'strong' in z.files and str(z['strong']):
+            p = str(z['strong'])
+            return p if os.path.isabs(p) else f'{WS}/{p}'
+    args_path = f'{WS}/runs/{run}/args.json'
+    a = json.load(open(args_path)) if os.path.exists(args_path) else {}
+    return a.get('strong') or f'{WS}/data/orig_index.csv'
+
+
+def splice_bg(y, a, b, keep_inside, fade=640):
+    """replace [a, b) (keep_inside=False) or everything outside it (True) by background-matched noise, 20 ms fades"""
+    bg = background_noise(y, len(y))
+    m = np.zeros(len(y), np.float32)
+    a, b = max(0, a), min(len(y), b)
+    m[a:b] = 1.0
+    if a > 0:
+        m[max(0, a - fade) : a] = np.linspace(0, 1, a - max(0, a - fade))
+    if b < len(y):
+        m[b : min(len(y), b + fade)] = np.linspace(1, 0, min(len(y), b + fade) - b)
+    if not keep_inside:
+        m = 1 - m
+    return (y * m + bg * (1 - m)).astype(np.float32)
+
+
+def run_context(runs):
+    res = {}
+    for run in runs:
+        d = pd.read_csv(strong_table(run), keep_default_na=False, na_values=[''])
+        d = d[~d.aug & d.label.isin(DIA + ['Unfinished'])]
+        acc = {}
+        for f in glob.glob(f'{WS}/runs/{run}/fold*/oof.npz'):
+            z = np.load(f, allow_pickle=True)
+            k = int(f.split('fold')[1].split('/')[0])
+            acc.update({int(i): (k, p) for i, p in zip(z['idx'], z['p'])})
+        d = d.loc[[i for i in d.index if i in acc]].copy()
+        d['pred'] = [CLASSES[int(acc[i][1].argmax())] for i in d.index]
+        wrong = d[d.pred != d.label]
+        right = d[d.pred == d.label].sample(
+            min(len(wrong), (d.pred == d.label).sum()), random_state=0
+        )
+        rows = pd.concat([wrong, right])
+        models, recs, sheet = {}, [], []
+        for i, r in rows.iterrows():
+            y = norm(load_seg(r.npy, r.t0, r.t0 + 4, N))
+            sp = song_span(y)
+            if sp is None:
+                continue
+            a, b = int((sp[0] - 0.15) * SR), int((sp[1] + POST) * SR)
+            # control | song only (context replaced) | context only (song replaced)
+            X = np.stack([y, splice_bg(y, a, b, True), splice_bg(y, a, b, False)])
+            k = acc[i][0]
+            if k not in models:
+                models[k] = load_torch_model(f'{WS}/runs/{run}/fold{k}/model.pt')
+            with torch.no_grad():
+                P = torch.softmax(models[k](torch.from_numpy(X)), 1).numpy()
+            pr = [CLASSES[int(p.argmax())] for p in P]
+            interesting = r.pred == r.label and (pr[1] != r.label or pr[2] == r.label)
+            if len(sheet) < 12 and interesting and r.label in ('BC', 'BlBh', 'BE'):
+                with torch.no_grad():
+                    mels = [models[k].frontend(torch.from_numpy(x[None]))[0, 0].numpy() for x in X]
+                title = f'{r.label}: ctl {pr[0]} | song-only {pr[1]} | ctx-only {pr[2]}'
+                sheet.append((mels, sp, title))
+            recs.append(
+                dict(
+                    idx=i,
+                    label=r.label,
+                    orig_correct=r.pred == r.label,
+                    ctl=pr[0] == r.label,
+                    song_only=pr[1] == r.label,
+                    ctx_only_none=pr[2] == 'None',
+                    ctx_only_same=pr[2] == r.label,
+                    pred_ctl=pr[0],
+                    pred_song=pr[1],
+                )
+            )
+        D = pd.DataFrame(recs)
+        W, R = D[~D.orig_correct], D[D.orig_correct]
+        os.makedirs(f'{WS}/results', exist_ok=True)
+        D.to_csv(f'{WS}/results/explain_context_{run}.csv', index=False)
+        if sheet:
+            fig, ax = plt.subplots(len(sheet), 3, figsize=(12, 2.2 * len(sheet)), squeeze=False)
+            for row, (Ss, sp, title) in zip(ax, sheet):
+                lo, hi = np.percentile(Ss[0], 30), np.percentile(Ss[0], 99.7)
+                for a_, S_, nm in zip(row, Ss, ['control', 'song only', 'context only']):
+                    a_.imshow(S_, origin='lower', aspect='auto', cmap='magma', vmin=lo, vmax=hi)
+                    a_.axis('off')
+                    a_.axvline((sp[0] - 0.15) * SR / HOP, color='c', lw=0.8)
+                    a_.axvline((sp[1] + POST) * SR / HOP, color='c', lw=0.8)
+                    a_.set_title(f'{nm}: {title}' if nm == 'control' else nm, fontsize=7)
+            plt.tight_layout()
+            plt.savefig(f'{OUT}/{run}_context.png', dpi=55)
+            plt.close()
+        print(
+            'broken correct -> song-only pred:',
+            R[~R.song_only].groupby('label').pred_song.value_counts().to_dict(),
+        )
+        r_ = {
+            'n_wrong': len(W),
+            'n_right': len(R),
+            'errors_fixed_by_song_only': float(W.song_only.mean()),
+            'correct_broken_by_song_only': float(1 - R.song_only.mean()),
+            'ctx_only_pred_none': float(D.ctx_only_none.mean()),
+            'ctx_only_still_label_right': float(R.ctx_only_same.mean()),
+            'per_class_fixed': W.groupby('label').song_only.mean().round(3).to_dict(),
+            'per_class_broken': (1 - R.groupby('label').song_only.mean()).round(3).to_dict(),
+        }
+        print(run, json.dumps(r_), flush=True)
+        res[run] = r_
+    json.dump(res, open(f'{WS}/results/explain_context_{"+".join(runs)}.json', 'w'), indent=1)
+
+
 if __name__ == '__main__':
     if sys.argv[1] == 'maps':
         run_maps(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 30)
+    elif sys.argv[1] == 'context':
+        run_context(sys.argv[2].split(','))
     else:
         run_patch(sys.argv[2].split(','))

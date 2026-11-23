@@ -6,11 +6,12 @@
 #
 # **Question.** Passive-recorder data makes the model robust in that domain.
 #
-# **Status:** running (from the research session). Fold 0 only: macro-F1 0.775 (R2 fold 0: 0.799).
-# Review warnings: (1) every passive-recorder training song is constrained to BhBl, so "passive
-# acoustics => BhBl" is a learnable shortcut, and the JCU "wrong-dialect rate" metric rewards it;
-# this is the main risk for the Italian data. (2) JCU test recorders sit 120-170 m from training
-# recorders. Check with evaluation/dialect_prior_shift.py before trusting it.
+# **Status:** running (from the research session). Folds 0-2: macro-F1 0.780 (R2 on the same folds:
+# about 0.78), BlBh recall 0.74; folds 3-4 were training on 2026-11-23. Review warnings: (1) every
+# passive-recorder training song is constrained to BhBl, so "passive acoustics => BhBl" is a
+# learnable shortcut, and the JCU "wrong-dialect rate" metric rewards it; this is the main risk for
+# the Italian data. (2) JCU test recorders sit 120-170 m from training recorders. Check with
+# evaluation/dialect_prior_shift.py before trusting it.
 #
 # Run from the repository root with `python -m experiments.r6_jcu_weak`, or step through the cells
 # in an editor / Jupyter whose working directory is the repository root. Training writes to

@@ -2,7 +2,7 @@
 # # ending_zoom
 #
 # Detect-then-zoom: a coarse network over the whole window plus a high-resolution (27 Hz, 5 ms)
-# network on the 1.5 s around the end of the song.
+# network on the 1.8 s around the end of the song.
 #
 # **Question.** Given a complete song the dialect is right 97 % of the time; the errors are a
 # missed faint ending. Resolution spent only where the ending is costs little and makes the
@@ -31,7 +31,7 @@ settings = TrainSettings(
     # data
     labelled_table='data/orig_aligned.csv',
     extra_tables={
-        'data/weak_v3.csv': 0.35,
+        'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
         'data/vizann_v1.csv': 0.07,
     },

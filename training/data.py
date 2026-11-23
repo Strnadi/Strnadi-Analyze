@@ -22,6 +22,7 @@ import pandas as pd
 import torch
 
 from config import C2I, CLASSES, DIALECTS, SR, WS, workspace_path
+from processing.audio_repair import background_noise, fill_zero_runs
 
 #: Frame targets are produced every 20 ms; the losses resample them to the model's frame rate.
 FRAME_RATE = 50
@@ -40,22 +41,36 @@ def read_table(path, **read_csv_arguments):
     )
 
 
-def load_seg(npy, t0, t1, n):
+def load_seg(npy, t0, t1, n, raw=False):
     """Read `n` samples starting at `t0` seconds from a cached recording.
 
-    The window is shifted to stay inside the file. A file shorter than the window is padded with
-    low-level noise: never zeros, never reflection (reversed audio turns BhBl into a BlBh-like
-    pattern). `t1` is unused and kept for compatibility with the data-preparation scripts.
+    The window is shifted to stay inside the file. Two repairs keep artificial silence out of the
+    model's input (research log section 17.3; a dark block after a song reads as "no ending"):
+
+    - runs of digital zeros of 10 ms or more (MP3 decoder delay, zero-padded excerpts) are filled
+      with noise shaped like the recording's own background;
+    - a file shorter than the window is padded with the same background noise. Never zeros, never
+      reflection (reversed audio turns BhBl into a BlBh-like pattern).
+
+    `raw=True` gives the loader as it was before 2026-11-23 (no zero filling, faint white-noise
+    padding): the stored predictions of the runs up to R6 were made with it. `t1` is unused and kept
+    for compatibility with the data-preparation scripts.
     """
     recording = np.load(npy, mmap_mode='r')
     start = int(round(t0 * SR))
     start = max(0, min(start, len(recording) - n))
     waveform = np.asarray(recording[start : start + n], dtype=np.float32) / 32768.0
 
+    if raw:
+        if len(waveform) < n:
+            noise_level = float(np.std(waveform)) * 0.05 + 1e-5 if len(waveform) else 1e-4
+            padding = np.random.default_rng(len(waveform)).normal(0, noise_level, n - len(waveform))
+            waveform = np.concatenate([waveform, padding.astype(np.float32)])
+        return waveform
+
+    waveform = fill_zero_runs(waveform)
     if len(waveform) < n:
-        noise_level = float(np.std(waveform)) * 0.05 + 1e-5 if len(waveform) else 1e-4
-        padding = np.random.default_rng(len(waveform)).normal(0, noise_level, n - len(waveform))
-        waveform = np.concatenate([waveform, padding.astype(np.float32)])
+        waveform = np.concatenate([waveform, background_noise(waveform, n - len(waveform))])
     return waveform
 
 

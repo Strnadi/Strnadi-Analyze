@@ -4,7 +4,9 @@
 
 1. Song events from the tonal-SNR segmenter (`processing/segment.py`); pieces of one song are merged.
 2. Each song is classified from 3 windows starting 0.6 / 0.4 / 0.2 s before its onset (probabilities averaged),
-   so the whole song, including its ending, is inside every window.
+   so the whole song is inside every window. For long songs the windows start later, so that at least 1.1 s
+   follows the detected end: the detector often stops at the B element, before the quiet terminal C / E.
+   Digital silence in the upload is filled with background noise, as in training.
 3. Songs classified "None" are dropped. A dialect below `min_confidence` is reported as "Unknown".
 
 Why not the old sliding-window logic (`runner.py`, 4 s windows every 0.5 s, keep the most confident of
@@ -18,10 +20,12 @@ peak normalisation is inside the graph.
 """
 
 import numpy as np
+from processing.audio_repair import background_noise, fill_zero_runs
 from processing.segment import segment_songs
 
 SR, WIN = 32000, 128000
 OFFSETS = (-0.6, -0.4, -0.2)
+TAIL_AFTER_END = 1.1  # seconds a window should keep after the detected song end
 
 
 class SongClassifier:
@@ -36,11 +40,10 @@ class SongClassifier:
         self.dialects = [l for l in self.labels if l not in ('None', 'Unfinished')]
 
     def _windows(self, y, starts):
-        if len(y) < WIN:  # same rule as training: low-level noise matched to the file, never zeros
-            sd = float(np.std(y)) * 0.05 + 1e-5
-            y = np.concatenate(
-                [y, np.random.default_rng(len(y)).normal(0, sd, WIN - len(y)).astype(np.float32)]
-            )
+        if (
+            len(y) < WIN
+        ):  # same rule as training: pad with the recording's own background, never zeros
+            y = np.concatenate([y, background_noise(y, WIN - len(y))])
         out = []
         for t in starts:
             i0 = max(0, min(int(round(t * SR)), len(y) - WIN))
@@ -62,17 +65,28 @@ class SongClassifier:
                 events.append([s0, s1])
         return [(s0, s1) for s0, s1 in events if s1 - s0 >= 0.6]
 
+    @staticmethod
+    def window_start(onset, end, offset):
+        """Start of a 4 s window for a song detected at [onset, end].
+
+        Normally `onset + offset` (0.6 / 0.4 / 0.2 s of lead-in). The detected end is often the B
+        element; the quiet terminal C / E element follows up to 1.1 s later (research log 17.4).
+        For a long song the window therefore starts later, so that it still reaches
+        `end + TAIL_AFTER_END`, but never later than 0.1 s before the onset.
+        """
+        latest_useful = min(end + TAIL_AFTER_END - WIN / SR, onset - 0.1)
+        return max(onset + offset, latest_useful)
+
     def classify(self, y):
         """y: mono float32 waveform at 32 kHz. Returns the `/classify` response dict."""
-        y = np.asarray(y, np.float32)
+        # Digital silence (decoder delay, zero padding) is filled like in training: a black block
+        # after a song reads as "no ending".
+        y = fill_zero_runs(np.asarray(y, np.float32))
         events = self.songs(y)
         if not events:
             return {'representantId': -1, 'segments': []}
-        P = (
-            self._predict(self._windows(y, [s0 + o for s0, _ in events for o in OFFSETS]))
-            .reshape(len(events), len(OFFSETS), -1)
-            .mean(1)
-        )
+        starts = [self.window_start(s0, s1, o) for s0, s1 in events for o in OFFSETS]
+        P = self._predict(self._windows(y, starts)).reshape(len(events), len(OFFSETS), -1).mean(1)
         segments = []
         for (s0, s1), p in zip(events, P):
             best = int(p.argmax())

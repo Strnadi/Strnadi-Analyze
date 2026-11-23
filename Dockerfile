@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r requirements-serving.txt
 # the service needs only the pipeline, the segmenter and the shared constants (no torch, no training code)
 COPY ./config.py ./runner.py ./
 COPY ./serving ./serving
-COPY ./processing/__init__.py ./processing/segment.py ./processing/
+COPY ./processing/__init__.py ./processing/segment.py ./processing/audio_repair.py ./processing/
 
 # export a trained run first:  python -m serving.export_onnx <run_dir> model.onnx
 ARG HOST_MODEL_PATH=model.onnx

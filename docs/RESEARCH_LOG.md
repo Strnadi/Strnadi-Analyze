@@ -356,7 +356,7 @@ Tool: `explain.py maps <run>` and `explain.py patch <runs>`. Sheets are in `figs
 **Findings:**
 - **Dialect decisions read the ending.** Occlusion importance per second on the ending (last 0.7 s of the song) is 1.6–2.0× the clip average for BC/BE/BhBl/BlBh/XB, and 1.24 for Unfinished, which has no ending. In correct BhBl/BlBh examples the red patches sit on the Bh and Bl elements, and the temporal attention peaks on the final element.
 - **Unfinished** is decided at the end of the phrase and the region right after it, where an ending would be. That is the right evidence.
-- **Context is used heavily.** Importance density on the whole song span is ~1× the clip average, so outside-song regions matter as much as the phrase. Part of that is legitimate (silence after the ending = complete). Errors lean on context more: 59 % of importance outside the song for wrong predictions against 48 % for correct ones. The sheets show other birds and second songs driving errors.
+- **[SUPERSEDED by §17.4: the 'outside' region contained the faint C/E terminal elements the segmenter misses]** **Context is used heavily.** Importance density on the whole song span is ~1× the clip average, so outside-song regions matter as much as the phrase. Part of that is legitimate (silence after the ending = complete). Errors lean on context more: 59 % of importance outside the song for wrong predictions against 48 % for correct ones. The sheets show other birds and second songs driving errors.
 - **Low band (< 2.5 kHz, background):** 2–6 % of importance for dialect classes, 12 % for None and 8.5 % for Unfinished.
 - **Zero-padded clip example:** F001790.4, BlBh predicted BC. Grad-CAM's hottest spot is inside the digital-silence tail. Realignment (§15) removes such windows.
 
@@ -375,3 +375,172 @@ The decay with distance shows most of the effect is the faint tail of the last e
 1. Re-run maps and the patch test for R7 (cf_v4 + aligned windows) and the best sweep architectures.
 2. Add a context-dependence test: mask everything outside the song and measure the accuracy drop.
 3. R8 candidate: other-species background mixing (hard-negative windows added at −5…+10 dB below the song) to reduce context-driven errors.
+
+### 16.x Corpus re-scoring with onset3 BirdNET windows (2026-11-23)
+`scripts/rescore_yh.py`: 63,238 song_index segments that the 3 s-grid pass scored < 0.3 were re-scored with 3 windows at onset −1.0/−0.5/0.0 s (max).
+7,784 now pass yh ≥ 0.3: ncs 4,110, vizina 3,176, audiomoth_bhbl 498. `yh = max(old, new)`, old value kept in `yh_grid3`; backup `song_index.pre_rescore.parquet`.
+Done in §17: QA found borrowed scores; rebuilt as weak_v5 / unlabeled_v4 via song_events.py.
+
+
+## 17. Data hygiene round 2 + context test (2026-11-23 afternoon)
+
+### 17.1 Re-scored songs: QA found borrowed scores
+QA sheet `figs/qa/rescored_s{0,1}.png` (newly admitted songs): mostly real, complete Yellowhammer songs, but in about a
+quarter of the windows the song starts 2-3 s into the clip.  The segment at the onset is another sound, and its score
+was borrowed from the *next* song, which the onset+3 s BirdNET window reaches.  Measured: a following segment
+starts within 3 s of the onset for 20.6 % of newly admitted segments, against 9.6 % of segments that already passed.
+So the existing weak set also had windows cutting a neighbouring song at the edge.
+
+### 17.2 `scripts/song_events.py` (events + clean window placement), used by build_weak_set / build_unlabeled
+- **Events:** segments merged when gap < 0.6 s and the event stays <= 3.8 s (as realign_orig); yh = max over members.
+- **Placement:** a 4.4 s window that
+  - contains the event inside the crop-safe zone [w0+0.4, w0+4.0] (train_cv draws a random 4 s crop);
+  - preferably keeps >= 1.1 s after the detected end (terminal elements, §17.4);
+  - lies inside the file;
+  - is crossed by no other event.
+
+  Candidates are ranked by distance from the default onset-0.6 s; short excerpts (< 4.4 s) use the whole file only
+  if the song is fully inside it.  Unplaceable events are dropped.
+- **'borrowed'** (admitted only by the onset re-score while another event starts within 3 s): dropped.
+- **Usable events (yh >= 0.3):** ncs 95.2 %, vizina 96.2 %, audiomoth 97.5 %, birdnet_yh 49.6 % (the rest of the
+  BirdNET excerpts cut the song at their edges; they stay in SSL, which needs no complete songs).  Windows moved:
+  15-16 %.  Guaranteed in-crop time after the detected end: median 1.5 s, >= 1.0 s for 78 %.
+- QA `figs/qa/moved_s{0,1,2}.png`: the first version parked songs at the window edge (shift -2 s), fixed by the
+  crop-safe zone; the final version keeps all terminal elements in view.
+- **Output:**
+
+  | Table | Rows | Note |
+  |---|---|---|
+  | `weak_v5.csv` | 50,788 | v3 had 47,773; more BhBl and BlBh |
+  | `unlabeled_v4.csv` | 75,427 | |
+
+  The queue was switched to weak_v5 for r7_s0, the architecture sweep and r3_s0; R7 folds 0/1 (started on older
+  tables) were restarted.  r2_s1 and r6 keep weak_v3 for like-for-like comparison.
+
+### 17.3 Loader hygiene (`train_cv.load_seg`, also used by SSL/explain/QA)
+- **Short-file padding:** files shorter than the window were padded with white noise at 0.05 x std, about 26 dB
+  below the file, which drew a dark block (black-patch-like cue) after 41 % of birdnet_yh excerpts.  Now `bg_noise`:
+  noise with the file's 25th-percentile per-bin STFT magnitude (background even in song-dense excerpts).
+  QA `figs/qa/pad_old_new{,2}.png`.
+- **Digital-zero runs** (>= 10 ms) are now filled with the same background noise.  Prevalence by source:
+
+  | Source | Files with runs | Where | Run length |
+  |---|---|---|---|
+  | vizina | 72 % | file start | 13 ms (MP3 decoder delay) |
+  | ncs | 29 % | start/end | median 0.125 s, up to 0.64 s |
+  | birdnet_yh | 11 % | interior | median 19 ms, up to 10 s |
+
+  Real phone recordings never contain these; Grad-CAM had found a prediction driven by digital silence (§16).
+
+### 17.4 Context-dependence test (`explain.py context`) and a correction of §16
+Method: OOF song clips (all errors plus as many correct, dialect/Unfinished labels) re-scored with (a) everything
+outside [onset-0.15, end+POST] replaced by the clip's own background noise ('song only') and (b) the song replaced by
+background ('context only').
+
+**First run (POST = 0.35 s):** R2 lost 48 % of its correct BC predictions in song-only, almost all becoming
+Unfinished, and 26 % of context-only clips kept their label.  The sheet (`figs/explain/r2_s0_context.png`) shows why.
+The quiet, short terminal **C element of BC** (and BE's E) follows the B whistle by 0.3-1.1 s and is below the tonal
+segmenter's threshold and minimum duration, so the "song span" stopped at B.  The model was right: without C the song
+*is* unfinished, and C alone still says BC.  A low-threshold faint-element extension caught only some of these, so
+the test now keeps a fixed POST = 1.2 s.
+
+Results with POST = 1.2 s (n = 761-792 clips):
+
+| | base_v3 | R2 |
+|---|---|---|
+| context-only clip predicted None | 0.48 | **0.90** |
+| context-only clip still predicted as its label | 0.34 | **0.07** |
+| errors fixed by removing context | 0.054 | 0.078 (Unfinished 0.17) |
+| correct predictions broken by removing context | 0.037 | 0.046 |
+
+**Conclusion:** R2 reads the song itself; the weak/partial-label data cut the baseline's context use (34 % → 7 %).
+Only ~8 % of R2's errors are context-driven, so R8 (other-species background mixing) is downgraded.  The occlusion
+"outside" share in §16 is confounded by the same missed terminal elements; the occlusion maps themselves are fine.
+
+**Pipeline caution (production too):** the energy/tonal segmenter's song end is often the B element.  Any cutting of
+songs (app, backend, weak windows, realignment) must keep >= ~1.1 s after the detected end, or BC/BE songs turn into
+"Unfinished".  realign_orig windows extend to onset+3.8 s (fine for songs <= 2.7 s); song_events now prefers this
+margin.
+
+### 17.5 R4 (FixMatch, unlabeled_v2) and R5 (hard negatives + phone codecs) vs R2, 5 folds, paired bootstrap
+- **R4:** macro-F1 0.775 (R2 0.774), diff -0.001 [-0.015, +0.013].  R2 is ahead on BhBl (+0.035, P 0.89) and BlBh
+  (+0.051, P 0.91).  Expert birds: acc 0.924 (R2 0.939), BlBh recall 0.835 (R2 0.873).  Vizina held-out acc 0.988.
+  **FixMatch gives no gain at this scale; not adopted.**
+- **R5:** macro-F1 -0.013 vs R2 [-0.002, +0.028], P(R2 better) 0.95.
+  - None improves +0.048 (the hard negatives work).
+  - Dialects get worse: BC -0.015, XB -0.022, BhBl -0.035.
+  - The codec part needs the device-robustness test (the strong OOF set has no phone audio).
+
+  Hard negatives are worth keeping only at a lower pool share; to retest inside the R7 recipe.
+
+### 17.6 Calibration (calibrate.py, cross-fitted)
+| | ECE raw | ECE after T-scaling | conformal 90 %: singleton / dialect singleton | auto-accept at 95 % acc |
+|---|---|---|---|---|
+| base_v3 | 0.020 | 0.019 | 0.882 / 0.908 | 0.511 |
+| R2 | 0.036 | 0.037 | **0.919 / 0.941** | 0.513 |
+| R4 | 0.030 | 0.028 | 0.921 / 0.945 | 0.463 |
+
+Temperature scaling does not fix the factorised head (its output is a product of probabilities, not a softmax).
+For production, use conformal sets or per-class thresholds rather than raw confidence (the backend's fixed 70 % cut).
+
+### 17.7 R2 re-scored on realigned windows (`oof_rescore.py`): like-for-like baseline for R7, and a terminal-element check
+R2 fold models on their own OOF rows of orig_aligned.csv (eval crop = window start = onset-0.6 s):
+- macro-F1 0.770 (on the original windows: 0.774); accuracy on moved clips 0.869 → 0.861, kept clips 0.890 → 0.890.
+- **R7 must be compared with 0.770** (same windows).
+- Unfinished clips that were moved: 1693, of which 23 flip to a dialect (12 with conf > 0.8).  Sheet
+  `figs/qa/unf_flips.png`: in most of them the new window shows the C/E stroke after B that the original clip cut off.
+  The label was right for the old clip but is wrong for the new window.
+- 318 moved Unfinished clips had their detected end < 1.1 s before the old clip edge, but only these 23 change prediction.
+- Kept for R7 (0.6 % of rows; R2-on-aligned sees the same windows, so the comparison is fair).  Listed in
+  `results/expert_audit.csv` (144 rows: 121 unf_cut + 23 unf_reveal), to be fixed in the next data generation.
+
+### 17.8 Production pipeline audit (repo `main`, read-only; nothing changed)
+- **Windowing:** no segmenter.  4 s windows on a 0.5 s grid over the whole recording at 48 kHz.  Argmax per window;
+  "None" is dropped and confidence < 70 % becomes "Unknown"; overlapping windows are merged keeping the most
+  confident (`runner.py:31-41, 79-85, 114-139`).
+- **Not affected:** the "detected end stops at B" issue (§17.4) does not apply here.
+- **Issues found:**
+  1. Windows past the end of the file are **zero-padded** (digital silence; §16/§17.3 showed it drives predictions).
+  2. Training peak-normalises (`model/densenet.py:126`) but inference does not: a train/serve mismatch.
+  3. `predicted = zip(...)` is consumed by `max(...)`, so `fullPredictions` in the API response is always `{}`.
+  4. Grid windows ignore song onsets.  bn_hop_check showed onset-anchored windows recover more songs; our models
+     are trained on onset-anchored windows (onset at 0.2-0.6 s), so serving should anchor on onsets too, or average
+     3 grid windows around each onset.
+- An unmerged fix `codex/fix-classifier-window-bounds` aligns the last window to the file end.  It branches before
+  016fe98, so merging it as-is would revert the multi-representative change.
+- Branch `pytorch-restructure` (not deployed) serves an ONNX model with onset windows (-0.6/-0.4/-0.2 s): the
+  right direction; its segmenter settings match ours.
+
+### 17.9 Mobile export path verified (R2 fold 0: StrnadNet + factorised head, 1.52 M params)
+`export_model.py` (waveform → probs/emb/att; STFT as conv1d; peak normalisation inside the graph), then
+`export_model.py --tflite` (onnx2tf), then `tflite_parity.py`.
+
+Two fixes were needed:
+1. `FactorHead` built its output with `torch.empty(len(z), 7)`, which the tracer froze to batch 2.  Now `torch.stack`
+   (identical values and gradients; verified).
+2. onnx2tf's default `flatbuffer_direct` backend wrote graphs that fail to allocate (reshape 51200 != 128).  Now a
+   static `waveform:1,128000` input and `-tb tf_converter`.
+
+Parity on 400 fold-0 OOF clips (1 thread, x86):
+
+| | size | max \|Δp\| vs torch | argmax agree | acc | ms / 4 s clip |
+|---|---|---|---|---|---|
+| torch | – | – | – | 0.8875 | 86 |
+| ONNX | 6.3 MB | 5e-7 | 1.000 | – | – |
+| TFLite fp32 | 6.5 MB | 0.0017 | 1.000 | 0.8875 | 84 |
+| **TFLite fp16** | **3.3 MB** | 0.040 | 1.000 | 0.8875 | 83 |
+| TFLite dyn-int8 | 2.0 MB | 0.53 | 0.985 | 0.8875 | 180 (x86; ARM kernels differ) |
+
+Production good-model-2 is 30.5 MB (DenseNet121, 48 kHz).  **fp16 is the deploy format**: one graph serves the app
+(TFLite) and the backend (ONNX, dynamic batch).  Int8 needs full-integer quantisation with a calibration set
+before use.
+
+Recording level (`eval_recordings`, NCS recordings, OOF):
+
+| | coverage | acc | BC | BE | BhBl | BlBh | XB |
+|---|---|---|---|---|---|---|---|
+| base_v3 | 0.893 | 0.957 | 0.973 | 0.936 | 0.944 | 0.810 | 0.997 |
+| R2 | **0.908** | **0.973** | 0.980 | 0.964 | 0.962 | **0.898** | 1.000 |
+| R4 | – | 0.970 | 0.978 | 0.961 | 0.954 | 0.882 | 1.000 |
+
+R2 remains the reference.
