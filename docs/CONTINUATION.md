@@ -164,7 +164,7 @@ Its own review agreed with the base review and added:
   the JCU metric rewards it; this is the main risk for the Italian recordings.
 - With the factorised head the weak songs give no completeness supervision at all.
 
-Then it produced this branch (three commits on `pytorch-restructure`):
+Then it produced this branch (`pytorch-restructure`, on top of `main`):
 
 - The Keras repository ported to PyTorch; the research code split into `layers/`, `model/`,
   `augment/`, `losses/`, `training/`; 54 experiments as notebook-style scripts; a shared
