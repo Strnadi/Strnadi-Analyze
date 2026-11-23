@@ -1,12 +1,14 @@
 # Continuation notes for the next agent (GPU server)
 
-State as of 2026-11-23, about 13:30 UTC. Written at the end of the session that restructured the
+State as of 2026-11-23, about 15:00 UTC. Written at the end of the session that restructured the
 repository. Read this file first, then `docs/REVIEW.md` (findings) and `docs/STATUS.md` (what is
 verified). `docs/RESEARCH_LOG.md` is the research session's own experiment log, section by section.
 
 This repository is public. Server paths, access links and anything from private correspondence are
-deliberately not in it: the project owner has a private companion note (`HANDOVER_PRIVATE.md`, kept
-in the workspace, not in git). Ask for it.
+deliberately not in it. They are in the workspace, not in git: `$STRNADI_WS/HANDOVER_PRIVATE.md`
+(paths, access, dates, people) and `$STRNADI_WS/handover/` (the full transcripts of the three sessions
+with all subagent traces and tool calls, start at `handover/sessions/INDEX.md`; a copy of the research
+code; the access details of the JCU share). If they did not come with the workspace, ask for them.
 
 ---
 
@@ -84,11 +86,11 @@ recomputed from the stored predictions with `python -m tools.project_state`):
 | r1_s0 | + weak pools, flat head | 5 | 0.754 | 0.50 | 0.53 | 0.80 / 0.85 |
 | **r2_s0** | + factorised head | 5 | **0.774** | 0.55 | 0.65 | 0.83 / 0.89 |
 | r5_s0 | R2 + hard negatives + codecs | 5 | 0.761 | 0.51 | 0.59 | 0.82 / 0.87 |
-| r4_s0 | R2 + FixMatch | 3 of 5 | 0.777 (folds 0-2) | 0.49 | 0.66 | 0.79 / 0.88 |
+| r4_s0 | R2 + FixMatch | 4 of 5 | 0.779 (folds 0-3) | 0.52 | 0.62 | 0.81 / 0.88 |
 | r6_s0 | R2 + JCU weak pool | 1 of 5 | 0.775 (fold 0) | 0.47 | 0.75 | 0.81 / 0.86 |
 
 R2 vs base: +0.029 [+0.012, +0.046] (paired recording bootstrap; seed variance not included).
-R2 on folds 0-2 alone is about 0.78, so R4 and R6 show no gain so far.
+R2 on the same folds alone is about 0.78, so R4 and R6 show no gain so far.
 
 Other measured facts:
 
@@ -100,13 +102,13 @@ Other measured facts:
   per minute (production logic: 0.774, 0.68).
 - Expert bird-level BE/BlBh test (332 birds): R2 0.939, base 0.893, the NCS file labels 0.863.
 - NCS bird-level accuracy of base_v3: 0.957 at 0.89 coverage.
-- Label-free pretraining from scratch (`ssl_v2`): linear-probe macro-F1 0.32 after 4,000 of 12,000
-  steps and ~6 CPU hours (supervised from scratch: 0.745; frozen Perch: 0.66). As both reviews
+- Label-free pretraining from scratch: linear-probe macro-F1 0.32 (`ssl_v2`) after 4,000 of 12,000
+  steps and ~6 CPU hours, 0.39 (`ssl_hub`) after 2,000 (supervised: 0.745; frozen Perch: 0.66). As both reviews
   predicted, it is a poor use of compute next to a pretrained teacher.
 - Parked: rule-based labelling from an element tracker (0.52 macro-F1, parser too noisy);
   bag-of-units VQ tokens (carry no dialect information without sequence modelling).
 
-**What was running on the CPU server at the time of writing:** R4 folds 3-4, R6 fold 1, `ssl_v2`,
+**What was running on the CPU server at the time of writing:** R4 fold 4, R6 fold 1, `ssl_v2`,
 `ssl_hub`, JCU download batch 2. **Queued behind them:** R7 (R2 + visual-QA fixes), the
 8-architecture sweep, `ssl_mae`, `ssl_ae`, second seeds of R2 / R1 / base, R3 (far-field), the
 identity model. The session itself had been idle for three hours, waiting for R7, and had been
