@@ -118,7 +118,8 @@ Other measured facts:
 - Label-free pretraining from scratch: linear-probe macro-F1 0.34 (`ssl_v2`) and 0.37 (`ssl_hub`)
   after 6,000 of 12,000 steps (supervised from scratch: 0.745; frozen Perch: 0.66).
   As both reviews predicted, it is a poor use of compute next to a pretrained teacher.
-- Recording level (covered NCS recordings): R4 0.970, base_v3 0.957; BlBh recall 0.88 vs 0.81.
+- Recording level (covered NCS recordings): R2 0.973 at 0.91 coverage, R4 0.970, base_v3 0.957 at
+  0.89; BlBh recall 0.90 / 0.88 / 0.81.
 - Calibration: temperature scaling does not help the factorised head (its output is a product of
   probabilities). Conformal sets at 90 % coverage give a single class for 92 % of clips with R2
   (88 % for the baseline). Use conformal sets or per-class thresholds in production, not the
