@@ -65,6 +65,10 @@ class TrainSettings:
 
     # ---------------------------------------------------------------------------- optimisation
     epochs: int = 25
+    #: Stop a fold when the inner-validation loss has not reached a new minimum for this many
+    #: epochs (0 = always train all epochs). The kept checkpoint is the same either way, as long as
+    #: the minimum does not come later than the patience allows; it saves compute.
+    early_stopping_patience: int = 0
     samples_per_epoch: int = 4096
     batch_size: int = 48
     learning_rate: float = 2e-3
@@ -77,6 +81,9 @@ class TrainSettings:
     #: Class balancing inside each data pool: sampling weight = class count ** -power.
     class_balance_power: float = 0.5
     focal_gamma: float = 0.0
+    #: Class weights IN THE LOSS for hand-labelled clips: weight = (class count) ** -power,
+    #: scaled to a mean of 1. 0 = none (balancing is then done by the sampler alone).
+    class_weight_power: float = 0.0
     #: Noise-robust loss on the hard labels: 0 = cross-entropy, 0.7 = generalised cross-entropy
     #: (losses/generalized_cross_entropy.py).
     robust_loss_q: float = 0.0

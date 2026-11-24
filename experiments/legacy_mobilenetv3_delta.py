@@ -6,7 +6,8 @@
 #
 # **Question.** An edge-friendly backbone for the phone at the production recipe's accuracy.
 #
-# **Status:** proposed (from the original Keras repository). No stored result in the legacy repo.
+# **Status:** rerun (from the original Keras repository). Re-targeted on 2026-11-24 to the audited clips and
+# best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. No stored result in the legacy repo.
 # Not re-trained.
 #
 # Run from the repository root with `python -m experiments.legacy_mobilenetv3_delta`, or step
@@ -24,10 +25,8 @@ RUN = 'legacy_mobilenetv3_delta'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_index.csv',
-    eval_window='start',
-    # protocol
-    checkpoint_rule='inner_argmax',
+    labelled_table='data/clips_audited.csv',
+    eval_window='center',
     # optimisation
     epochs=30,
     samples_per_epoch=4096,

@@ -6,7 +6,8 @@
 #
 # **Question.** Keeping Perch's time axis recovers the element order that pooling throws away.
 #
-# **Status:** done (from the research session). 0.741 macro-F1, acc 0.863 (pooled MLP: 0.691):
+# **Status:** rerun (from the research session). Re-targeted on 2026-11-24 to the audited clips and
+# best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. 0.741 macro-F1, acc 0.863 (pooled MLP: 0.691):
 # equal to the from-scratch StrnadNet baseline (0.745) with no fine-tuning, and a fold trains in
 # minutes. BirdNET 3.0 under the same protocol: 0.523.
 #
@@ -27,11 +28,9 @@ RUN = 'perch_frozen_temporal'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_index.csv',
+    labelled_table='data/clips_audited.csv',
     inputs='perch_spatial',
-    eval_window='start',
-    # protocol
-    checkpoint_rule='inner_argmax',
+    eval_window='center',
     # optimisation
     epochs=30,
     samples_per_epoch=8192,

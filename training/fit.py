@@ -389,6 +389,7 @@ class FoldTraining:
 
         self.test_labels = self.test.label.map(C2I).values
         self.inner_labels = self.inner_validation.label.map(C2I).values
+        self.class_weights = _loss_class_weights(train, settings.class_weight_power)
 
         # The evaluation windows never change: read them once and keep them in memory.
         self.inner_waveforms = load_eval_waveforms(
@@ -529,6 +530,13 @@ class FoldTraining:
             self._write_board(epoch, entry)
             self._save_resume_point(epoch)
 
+            patience = settings.early_stopping_patience
+            epochs_since_best = epoch - self.keeper.best_loss[1]
+            if patience > 0 and inner_loss is not None and epochs_since_best >= patience:
+                print(f'{self.fold} early stop: no new validation minimum for {patience} epochs')
+                self.board.add_text('early_stopping', f'stopped after epoch {epoch}')
+                break
+
         return self._finish()
 
     def _train_one_epoch(self):
@@ -641,8 +649,14 @@ class FoldTraining:
         waveforms = batch['wave']
         outputs = self._forward(waveforms)
 
+        example_weights = batch['w'].float()
+        if self.class_weights is not None:
+            # hand-labelled clips of rare classes count more (their target is one-hot)
+            class_weight = (batch['target'] * self.class_weights.to(self.device)).sum(1)
+            is_hard = batch['kind'] == HARD_LABEL
+            example_weights = torch.where(is_hard, example_weights * class_weight, example_weights)
         loss = classification_loss(
-            outputs, batch['target'], batch['kind'], batch['w'].float(), settings
+            outputs, batch['target'], batch['kind'], example_weights, settings
         )
 
         # --- per-frame auxiliary targets
@@ -910,6 +924,18 @@ def classification_loss(outputs, targets, kinds, weights, settings):
 
 
 # ====================================================================================== helpers
+def _loss_class_weights(train, power):
+    """Per-class loss weights (7,) from the class counts of the hand-labelled clips, or None."""
+    if power <= 0:
+        return None
+    labelled = train[train.pool == 'strong']
+    counts = labelled.label.value_counts().reindex(CLASSES).fillna(1).values.astype(float)
+    weights = counts**-power
+    # scale so that the average labelled clip keeps a weight of 1
+    weights = weights / (weights * counts).sum() * counts.sum()
+    return torch.tensor(weights, dtype=torch.float32)
+
+
 def _load_bank(path):
     """Load a bank of audio chunks (.npy object array) from the workspace, or None.
 

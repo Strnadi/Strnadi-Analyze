@@ -8,7 +8,8 @@
 # **Question.** Reproduce the deployed model under a leak-free protocol, as the reference the new
 # models are compared with.
 #
-# **Status:** proposed (from the original Keras repository). The Keras original reported ~82.5 %
+# **Status:** rerun (from the original Keras repository). Re-targeted on 2026-11-24 to the audited clips and
+# best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. The Keras original reported ~82.5 %
 # accuracy / 64.5 % macro recall on a random by-file split (optimistic: clips of one recording and
 # pre-baked augmented copies crossed the split). The deployed model on held-out Vizina males: BhBl
 # recall 0.55 over 58 males, ~45 % of complete BhBl songs called Unfinished. Not yet re-trained in
@@ -30,10 +31,8 @@ RUN = 'legacy_densenet121'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_index.csv',
-    eval_window='start',
-    # protocol
-    checkpoint_rule='inner_argmax',
+    labelled_table='data/clips_audited.csv',
+    eval_window='center',
     # optimisation
     epochs=30,
     samples_per_epoch=4096,
