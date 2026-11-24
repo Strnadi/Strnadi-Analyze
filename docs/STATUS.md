@@ -1,4 +1,14 @@
-# What is verified, what is not (2026-11-23)
+# What is verified, what is not
+
+**Update 2026-11-24.** Since the list below was written: the trainer was ported to the GPU and has
+trained ~25 five-fold experiments (`docs/RESULTS.md`); `tests/test_training.py`,
+`tests/test_models.py`, `tests/test_experiments.py` and `tests/check_names.py` pass on the GPU
+machine; `data/noise_bank_clean.npy`, duplicate-free folds and `data/species_bank.npy` were built;
+ONNX export was checked on the new checkpoints (ONNX Runtime vs PyTorch 2e-7). Still not run here:
+TFLite conversion of the new models, the Docker images, the Perch and EfficientAT wrappers,
+`training/pretrain.py`, `unsupervised.py`, `bird_level.py`.
+
+The rest of this file is the state of 2026-11-23.
 
 ## Verified by running it
 

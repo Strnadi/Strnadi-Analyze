@@ -1,4 +1,34 @@
-# Continuation notes for the next agent (GPU server)
+# Continuation notes
+
+> **Update 2026-11-24 (GPU server session). Read `docs/RESULTS.md` first; it supersedes the
+> numbers below.** What changed since these notes were written:
+>
+> - The clip labels were audited by eye (`docs/LABEL_AUDIT.md`): 224 relabelled, 140 removed.
+>   The old ceiling (accuracy ~0.87) was label noise; the 0.9 M-parameter model is now ~0.96
+>   accurate out of fold, 0.99 on the independent expert-annotated Vizina songs.
+> - The trainer runs on the GPU, logs to TensorBoard and keeps the checkpoint with the lowest
+>   inner-validation loss (section 4, step 4 below is done). One training at a time:
+>   `tools/run_queue.sh`.
+> - Labelled windows are the clips as labelled, not the re-cut windows (`orig_aligned.csv` is
+>   only used for the clip's position in its source recording). Folds are pinned in
+>   `label_audit/clip_folds.csv`.
+> - New: element sequences with CTC and a per-project table, machine labelling of the 70k
+>   unlabelled songs, field augmentations, explanation and embedding-map tools, the shipped
+>   model (`experiments/train_shipped_model.py`).
+> - Experiments are named by what they test. The research session's runs keep their stored names
+>   in the workspace: `base_v3` = `history_clip_labels_only`, `r1_s0` =
+>   `history_weak_pools_flat_head`, `r2_s0` = `history_weak_pools_factorized_head`, `r4_s0` =
+>   `history_fixmatch_unlabelled`, `r5_s0` = `history_hard_negatives_codec`, `r6_s0` =
+>   `history_passive_recorder_pool`, `r7_s0` = `history_recut_windows`; "R2", "R7" etc. in the
+>   text below and in `RESEARCH_LOG.md` refer to those.
+> - No distillation was used, by the owner's decision; sections 6 (step 5) and 7G no longer apply.
+> - This container's disk is not persistent and pushing from it was not permitted: the branch
+>   `strnadi-classifier` exists only as local commits until someone pushes it.
+>
+> The sections below are the state of 2026-11-23 and remain useful for the project background
+> (section 1), the data inventory (section 5), the traps (section 8) and the open questions for
+> the owner (section 9).
+
 
 State as of 2026-11-23, about 17:30 UTC. Written at the end of the session that restructured the
 repository. Read this file first, then `docs/REVIEW.md` (findings) and `docs/STATUS.md` (what is
