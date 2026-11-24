@@ -96,6 +96,9 @@ class TrainSettings:
     splice_probability: float = 0.0
     species_probability: float = 0.0
     random_eq_probability: float = 0.0
+    #: Treble removed from hand-labelled clips; XB / BC / BE then become "Unfinished"
+    #: (augment/treble_cut.py).
+    treble_cut_probability: float = 0.0
     #: A second, quieter Yellowhammer in the background (never added to a "None" clip).
     background_song_probability: float = 0.0
 

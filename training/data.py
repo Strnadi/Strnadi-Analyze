@@ -22,6 +22,7 @@ import pandas as pd
 import torch
 
 from config import C2I, CLASSES, DIALECTS, SR, WS, workspace_path
+from augment.treble_cut import treble_cut_example
 from processing.audio_repair import background_noise, fill_zero_runs
 
 #: Frame targets are produced every 20 ms; the losses resample them to the model's frame rate.
@@ -194,6 +195,14 @@ class ClipDataset(torch.utils.data.Dataset):
         waveform = load_seg(
             row.npy, window_start, window_start + settings.window_seconds, settings.window_samples
         )
+        treble_cut_probability = settings.treble_cut_probability if self.train else 0.0
+        if kind == HARD_LABEL and np.random.rand() < treble_cut_probability:
+            # the cut can remove the song's ending: the target is then recomputed
+            waveform, new_label = treble_cut_example(waveform, row['label'])
+            target = np.zeros(len(CLASSES), np.float32)
+            target[C2I[new_label]] = 1
+            example['target'] = torch.from_numpy(target)
+
         if self.train and self.augment is not None:
             contains_song = target[C2I['None']] < 0.5  # hard label or candidate set without None
             waveform = self.augment(waveform, may_add_song=bool(contains_song))
