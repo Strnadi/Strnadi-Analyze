@@ -164,6 +164,11 @@ def split_tables(settings, fold):
     )
     inner_validation = train[train.grp.isin(inner_recordings)]
     train = train[~train.grp.isin(inner_recordings)].assign(pool='strong')
+    if settings.labelled_fraction < 1.0:
+        training_recordings = np.sort(train.grp.astype(str).unique())
+        n_kept = max(1, int(round(len(training_recordings) * settings.labelled_fraction)))
+        kept = np.random.default_rng(2000 + fold).choice(training_recordings, n_kept, replace=False)
+        train = train[train.grp.astype(str).isin(set(kept))]
 
     # Relabelled training targets (e.g. disputed clips as candidate sets); evaluation keeps `label`.
     if 'train_label' in train:

@@ -14,6 +14,11 @@ class TrainSettings:
     #: Human-labelled clips with cross-validation folds (columns: npy, t0, t1, label, grp, fold).
     labelled_table: str = 'data/orig_index.csv'
 
+    #: Share of the labelled TRAINING recordings that is used (1.0 = all). For learning curves:
+    #: how good is the model with a tenth, a quarter, half of the hand-labelled clips? The test
+    #: fold and the inner validation set are never reduced.
+    labelled_fraction: float = 1.0
+
     #: Extra training-only tables (weak labels, synthetic songs, ...) -> share of training draws.
     #: The labelled clips get the remaining share.
     extra_tables: dict = field(default_factory=dict)
