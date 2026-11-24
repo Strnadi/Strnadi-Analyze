@@ -77,6 +77,9 @@ class TrainSettings:
     #: Class balancing inside each data pool: sampling weight = class count ** -power.
     class_balance_power: float = 0.5
     focal_gamma: float = 0.0
+    #: Noise-robust loss on the hard labels: 0 = cross-entropy, 0.7 = generalised cross-entropy
+    #: (losses/generalized_cross_entropy.py).
+    robust_loss_q: float = 0.0
     #: Additive cosine margin (CosFace), for models with a cosine head.
     margin: float = 0.0
     margin_scale: float = 16.0

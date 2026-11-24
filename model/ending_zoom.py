@@ -55,6 +55,11 @@ class EndingZoomNet(Model):
             branch).
         head: kind of classifier head (`layers.registry.build_head`).
         head_kw: dict of extra keyword arguments for the classifier head.
+        locate: where the crop is centred. 'energy' = the end of the last tonal event (the fixed
+            rule of step 2). 'attention' = the frame where the coarse branch's own temporal
+            attention peaks, which in trained models is the song's last element; the model then
+            looks twice at the place it already finds most informative, and the faint C / E
+            element that the energy rule misses is inside the crop by construction.
 
     The input must be a waveform (B, N) of at least `before_s + after_s` seconds. `forward`
     returns a dict: `logits` (B, n_classes) and `emb` (B, emb_dim) from the fused embedding (plus
@@ -78,8 +83,10 @@ class EndingZoomNet(Model):
         drop=0.2,
         head='factorized',
         head_kw=None,
+        locate='energy',
     ):
         super().__init__()
+        self.locate = locate
 
         # --- coarse branch: a small StrnadNet that reads the whole clip
         self.coarse = StrnadNet(
@@ -170,8 +177,12 @@ class EndingZoomNet(Model):
         coarse = self.coarse(wave)  # dict: emb (B, 128), att (B, 100), frames (B, 128, 100), ...
 
         # --- where does the song end?
-        coarse_spectrogram = self.frontend(wave)  # (B, 1, 128, 400)
-        end = self.song_end(coarse_spectrogram)  # (B,)   in samples
+        if self.locate == 'attention':
+            samples_per_frame = wave.shape[1] // coarse['att'].shape[1]
+            end = coarse['att'].detach().argmax(1) * samples_per_frame  # (B,)   in samples
+        else:
+            coarse_spectrogram = self.frontend(wave)  # (B, 1, 128, 400)
+            end = self.song_end(coarse_spectrogram)  # (B,)   in samples
 
         # --- cut the crop [end - before, end + after) out of the waveform, kept inside the clip
         crop_length = self.before + self.after  # 57600 samples = 1.8 s

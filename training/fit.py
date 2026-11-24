@@ -46,6 +46,7 @@ from losses.distill_cosine import distill_cosine
 from losses.element_ctc import class_log_likelihoods, element_ctc_loss
 from losses.factorized_weak import factorized_weak_loss
 from losses.fixmatch import FreeMatch
+from losses.generalized_cross_entropy import generalized_cross_entropy
 from losses.frame_bce import frame_bce
 from losses.frame_ce import frame_ce
 from losses.margin import cosface_margin
@@ -867,7 +868,11 @@ def classification_loss(outputs, targets, kinds, weights, settings):
     use_factorized_weak_loss = bool(is_candidate_set.any()) and 'log_dialect' in outputs
 
     per_example = torch.zeros(len(logits), device=logits.device)
-    if has_full_label.any():
+    if has_full_label.any() and settings.robust_loss_q > 0:
+        per_example[has_full_label] = generalized_cross_entropy(
+            logits[has_full_label], targets[has_full_label], settings.robust_loss_q
+        )
+    elif has_full_label.any():
         per_example[has_full_label] = soft_cross_entropy(
             logits[has_full_label],
             targets[has_full_label],
