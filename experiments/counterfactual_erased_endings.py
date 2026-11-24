@@ -10,7 +10,7 @@
 # for BhBl songs of one site only; this covers every dialect and every recording.
 #
 # **Differs from `strnadnet_audited_labels` (the reference) in:** the extra table
-# `data/erased_endings.csv` with 7 % of the training draws.
+# `data/erased_endings_v2.csv` with 7 % of the training draws.
 #
 # **Status:** done (from this session, 2026-11-24).
 #
@@ -31,7 +31,7 @@ settings = TrainSettings(
     labelled_table='data/clips_audited.csv',
     extra_tables={
         'data/weak_v5.csv': 0.33,
-        'data/erased_endings.csv': 0.07,
+        'data/erased_endings_v2.csv': 0.07,
         'data/cf_v4.csv': 0.08,
         'data/vizann_v1.csv': 0.07,
     },

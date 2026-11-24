@@ -1,7 +1,7 @@
 """Counterfactual "Unfinished" songs: complete songs with their terminal element erased.
 
     python -m processing.build_erased_endings [--run strnadnet_audited_labels]
-                                              [--out data/erased_endings.csv]
+                                              [--out data/erased_endings_v2.csv]
 
 Where the terminal element is, nobody has annotated. The trained model knows: its occlusion map
 for "is the song complete?" (evaluation/explain_model.py) lights up on the element that completes
@@ -17,8 +17,12 @@ BlBh, whose second whistle lies in the same band as the rest of the song.
 
 Fold hygiene: each clip is explained by the fold model that never trained on its recording, and
 the erased clip keeps its source clip's fold and recording, so it is never used to train the fold
-it would be tested in. New audio is written under `audio32k/erased_endings/`; nothing existing is
-modified.
+it would be tested in. New audio is written under `audio32k/<name of the table>/`; nothing
+existing is modified.
+
+`data/erased_endings.csv` (the first version) replaced the whole band with a 10 ms cross-fade and
+has a click at the edges of the erased stretch wherever the recording has loud low-frequency
+noise; it is kept for the record and not used. Version 2 erases above 1.2 kHz only (`erase`).
 """
 
 import argparse
@@ -36,7 +40,7 @@ from training.data import load_seg
 from training.inference import peak_normalize
 
 FRAME_SECONDS = 0.01  # the model's spectrogram has one frame per 10 ms
-FADE_SAMPLES = 320  # 10 ms cross-fade at both ends of the erased stretch
+FADE_SAMPLES = 960  # 30 ms cross-fade at both ends of the erased stretch
 MARGIN_BEFORE = 0.1  # seconds erased before the stretch the map marks
 # ... and after it: the map's 0.2 s patches often end inside the element, and what follows the
 # terminal element is background anyway (a first version left visible remnants of it)
@@ -68,30 +72,45 @@ def ending_span(complete_map):
     return max(start, 0.0), end
 
 
+def split_at(waveform, cutoff_hz=1200.0, roll_off_hz=300.0):
+    """Split a waveform into the part below `cutoff_hz` and the rest; the two add up to it."""
+    spectrum = np.fft.rfft(waveform)
+    frequency = np.fft.rfftfreq(len(waveform), 1 / SR)
+    gain = np.clip((cutoff_hz + roll_off_hz - frequency) / roll_off_hz, 0, 1)
+    low = np.fft.irfft(spectrum * gain, n=len(waveform)).astype(np.float32)
+    return low, waveform - low
+
+
 def erase(waveform, start, end):
-    """Replace waveform[start:end] (seconds) by noise shaped like the clip's own background."""
+    """Replace waveform[start:end] (seconds) by noise shaped like the clip's own background.
+
+    Only the band the model listens to (above 1.2 kHz) is replaced. The low band, where wind and
+    traffic are several times louder than the song, runs on untouched: cutting it produced a
+    click at both ends of the stretch in the first version of the table, a mark the model could
+    have learned instead of the missing ending.
+    """
+    low, high = split_at(waveform)
     first = int(start * SR)
     last = min(int(end * SR), len(waveform))
-    remainder = np.concatenate([waveform[:first], waveform[last:]])
-    filler = background_noise(remainder, last - first)
+    remainder = np.concatenate([high[:first], high[last:]])
+    _, filler = split_at(background_noise(remainder, len(waveform)))
 
-    erased = waveform.copy()
-    erased[first:last] = filler
-    fade = np.linspace(0, 1, FADE_SAMPLES, dtype=np.float32)
-    if first >= FADE_SAMPLES:  # fade from the original into the filler
-        mixed = waveform[first - FADE_SAMPLES : first] * (1 - fade) + filler[:FADE_SAMPLES] * fade
-        erased[first - FADE_SAMPLES : first] = mixed
-    if last + FADE_SAMPLES <= len(waveform):  # and back
-        mixed = filler[-FADE_SAMPLES:] * (1 - fade) + waveform[last : last + FADE_SAMPLES] * fade
-        erased[last : last + FADE_SAMPLES] = mixed
-    return erased
+    # 1 inside the erased stretch, raised-cosine ramps of 30 ms on both sides
+    filler_share = np.zeros(len(waveform), np.float32)
+    filler_share[first:last] = 1.0
+    ramp = (0.5 - 0.5 * np.cos(np.linspace(0, np.pi, FADE_SAMPLES))).astype(np.float32)
+    ramp_start = max(first - FADE_SAMPLES, 0)
+    filler_share[ramp_start:first] = ramp[FADE_SAMPLES - (first - ramp_start) :]
+    ramp_end = min(last + FADE_SAMPLES, len(waveform))
+    filler_share[last:ramp_end] = ramp[::-1][: ramp_end - last]
+    return low + high * (1 - filler_share) + filler * filler_share
 
 
 @torch.no_grad()
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--run', default='strnadnet_audited_labels')
-    parser.add_argument('--out', default='data/erased_endings.csv')
+    parser.add_argument('--out', default='data/erased_endings_v2.csv')
     arguments = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -103,7 +122,8 @@ def main():
     )
     complete = predictions[usable]
 
-    audio_dir = f'{WS}/audio32k/erased_endings'
+    # the audio of every version of the table has its own directory: nothing is overwritten
+    audio_dir = f'{WS}/audio32k/{os.path.basename(arguments.out).removesuffix(".csv")}'
     os.makedirs(audio_dir, exist_ok=True)
     rows, n_still_complete = [], 0
     for clip in complete.itertuples():
