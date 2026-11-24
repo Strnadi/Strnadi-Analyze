@@ -10,7 +10,9 @@ classifiers themselves are still trained without any model-made targets except w
 
     song       the windows of `data/songs_scan_detected.csv` (processing/harvest_songs_by_scan.py)
     no song    windows of a sample of the same recordings in which the classifier hears nothing:
-               p(song) below 0.02 in the window and below 0.2 in every window within 2 s of it
+               p(song) below 0.1 in the window and below 0.3 in every window within 2 s of it
+               (stricter limits of 0.02 / 0.2 left only 1,182 windows: the classifier is rarely that
+               sure of "no song")
 
 As in the other detector tables, `Unfinished` stands for "song". Rows keep the fold of their
 recording; the held-out Vizina males were never scanned. Nothing existing is modified.
@@ -40,7 +42,7 @@ def quiet_windows(starts, p_song, rng):
     loudest_nearby = np.array(
         [p_song[max(0, index - reach) : index + reach + 1].max() for index in range(len(p_song))]
     )
-    candidates = np.flatnonzero((p_song < 0.02) & (loudest_nearby < 0.2))
+    candidates = np.flatnonzero((p_song < 0.1) & (loudest_nearby < 0.3))
     rng.shuffle(candidates)
     chosen = []
     for index in candidates:
