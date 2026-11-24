@@ -11,7 +11,7 @@
 # **Status:** proposed (from review proposal). Not run. Listed in the research backlog as
 # "attention-MIL" / "bout-level set transformer", never built.
 #
-# **Needs.** out-of-fold song embeddings of a finished run: evaluation/embed_songs.py <run> (->
+# **Needs.** out-of-fold song embeddings of a finished run: evaluation/research_session/embed_songs.py <run> (->
 # results/song_emb_<run>.npz)
 #
 # Run from the repository root with `python -m experiments.recording_mil`, or step through the
@@ -24,7 +24,7 @@ from training.bird_level import fit_bird_level
 
 # %% Settings
 RUN = 'recording_mil'
-SONG_RUN = 'r2_factorized_weak'  # the run whose out-of-fold song embeddings are used
+SONG_RUN = 'strnadnet_audited_labels'  # the run whose out-of-fold song embeddings are used
 
 
 # %% Model

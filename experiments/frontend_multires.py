@@ -1,23 +1,19 @@
 # %% [markdown]
 # # frontend_multires
 #
-# Front-end ablation: three STFT window lengths (16 / 32 / 128 ms) stacked as input channels.
+# Three STFT window lengths (16 / 32 / 128 ms) stacked as input channels.
 #
-# **Question.** The missed element is a long, thin, faint tone: a 128 ms window integrates it and
-# gains several dB of SNR, while the short window keeps the fast syllables of the first phrase.
-# Targets complete-vs-Unfinished AUC for BhBl (0.79-0.83) and BlBh (0.84-0.89) directly.
+# **Question.** Short windows resolve the syllables, long windows the thin terminal whistles: does the stack beat one window?
 #
-# **Status:** proposed (from review proposal). Not run.
+# **Differs from `strnadnet_audited_labels` (the reference) in:** `frontend=dict(norm='percentile', n_fft=[512, 1024, 4096])`.
 #
-# **Needs.** processing/clean_noise_bank.py (-> data/noise_bank_clean.npy); data/orig_aligned.csv;
-# data/cf_v4.csv
+# **Status:** done (from this session, 2026-11-24).
 #
-# Run from the repository root with `python -m experiments.frontend_multires`, or step through the
-# cells in an editor / Jupyter whose working directory is the repository root. Training writes to
-# `$STRNADI_WS/runs/frontend_multires/`.
+# Run from the repository root with `python -m experiments.frontend_multires`.
+# Training writes to `$STRNADI_WS/runs/frontend_multires/` (TensorBoard: `tb/` in every fold directory).
 
 # %% Imports
-from evaluation.report import plot_error_examples, plot_run, summarize_run
+from evaluation.report import plot_run, summarize_run
 from model.strnadnet import StrnadNet
 from training.fit import cross_validate
 from training.settings import TrainSettings
@@ -27,7 +23,7 @@ RUN = 'frontend_multires'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_aligned.csv',
+    labelled_table='data/clips_audited.csv',
     extra_tables={
         'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
@@ -35,8 +31,6 @@ settings = TrainSettings(
     },
     noise_bank='data/noise_bank_clean.npy',
     eval_window='center',
-    # protocol
-    checkpoint_rule='inner_smooth3',
     # optimisation
     epochs=25,
     samples_per_epoch=6144,
@@ -44,23 +38,18 @@ settings = TrainSettings(
     learning_rate=0.002,
     # waveform augmentation
     noise_probability=0.5,
-    snr_db_range=(6.0, 26.0),
+    snr_reference='band',
     splice_probability=0.3,
 )
 
 
 # %% Model
 def make_model():
-    return StrnadNet(
-        head='factorized',
-        frontend=dict(norm='percentile', n_fft=[512, 1024, 4096]),
-    )
+    return StrnadNet(head='factorized', frontend=dict(norm='percentile', n_fft=[512, 1024, 4096]))
 
 
-# %% Train: one model per fold (recording-grouped cross-validation)
-cross_validate(RUN, make_model, settings)
-
-# %% Evaluate on the held-out clips of every fold
-summarize_run(RUN)
-plot_run(RUN)
-plot_error_examples(RUN)
+# %% Train: one model per fold (recording-grouped cross-validation), then evaluate
+if __name__ == '__main__':
+    cross_validate(RUN, make_model, settings)
+    summarize_run(RUN)
+    plot_run(RUN)

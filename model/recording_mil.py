@@ -11,7 +11,7 @@ file-level dialect labels are CORRECT bag supervision ("this recording contains 
 complete song of D") instead of noisy per-clip labels. It also detects mixed singers through the
 attention pattern.
 
-Train with `training/bird_level.py` (`experiments/recording_mil.py`) on embeddings cached by `evaluation/embed_songs.py`.
+Train with `training/bird_level.py` (`experiments/recording_mil.py`) on embeddings cached by `evaluation/research_session/embed_songs.py`.
 
 Status: proposed (research ideas "bout-level set transformer" and "attention-MIL", never built;
 fork review idea 8). Untrained.

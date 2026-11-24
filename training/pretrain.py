@@ -280,7 +280,7 @@ def pretrain_encoder(
             source. Keep at 0 for dialect work (see the module docstring).
         teacher_sees_clean_audio: for `masked_frames`, give the teacher the un-augmented song
             (denoising variant) instead of the student's view.
-        codebook: for `masked_units`, the .npz written by `evaluation/vq_tokens.py fit`.
+        codebook: for `masked_units`, the .npz written by `evaluation/research_session/vq_tokens.py fit`.
         noise_bank: background-noise bank for the views (skipped if the file is missing).
     """
     unknown = set(objectives) - set(OBJECTIVES)

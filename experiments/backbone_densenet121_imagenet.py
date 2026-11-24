@@ -1,16 +1,19 @@
 # %% [markdown]
-# # arch_regnety
+# # backbone_densenet121_imagenet
 #
-# Architecture comparison: ImageNet RegNetY-004 (5.1 M) + shared temporal head on the R7 recipe.
+# Control: the production backbone (ImageNet DenseNet121, 8.2 M) with the new data, losses and
+# temporal head.
 #
-# **Question.** Another mobile-class CNN family, for the size / accuracy curve.
+# **Question.** Is the production model weak because of its data and training protocol, or because
+# of the architecture?
 #
-# **Status:** queued (from the research session). Not finished. Backbone learning rate corrected
-# to 0.1x.
+# **Status:** queued (from the research session). Not finished. ~5x the training cost per step of
+# StrnadNet on CPU. See legacy_densenet121.py for the original design (patch pooling instead of a
+# temporal head).
 #
-# Run from the repository root with `python -m experiments.arch_regnety`, or step through the
+# Run from the repository root with `python -m experiments.backbone_densenet121_imagenet`, or step through the
 # cells in an editor / Jupyter whose working directory is the repository root. Training writes to
-# `$STRNADI_WS/runs/arch_regnety/`.
+# `$STRNADI_WS/runs/backbone_densenet121_imagenet/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -19,7 +22,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'arch_regnety'
+RUN = 'backbone_densenet121_imagenet'
 
 settings = TrainSettings(
     # data
@@ -49,7 +52,7 @@ settings = TrainSettings(
 
 # %% Model
 def make_model():
-    return TimmTemporal(backbone='regnety_004', head='factorized')
+    return TimmTemporal(backbone='densenet121', head='factorized')
 
 
 # %% Train: one model per fold (recording-grouped cross-validation)

@@ -16,6 +16,7 @@ import torch.nn as nn
 class LinearFilterbank(nn.Module):
     def __init__(self, n_bins=192, fmin=2000.0, fmax=9500.0, n_fft=1024, sr=32000):
         super().__init__()
+        self.fmin, self.fmax = fmin, fmax  # band edges in Hz (used to label plots)
         fft_freqs = np.fft.rfftfreq(n_fft, 1 / sr)  # (n_fft // 2 + 1,) centre of every STFT bin, Hz
         # n_bins + 2 equally spaced points: filter i rises from point i to its peak at point i + 1
         # and falls back to zero at point i + 2

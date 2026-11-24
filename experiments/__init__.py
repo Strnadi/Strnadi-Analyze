@@ -11,7 +11,7 @@ Every script reads top to bottom:
 
 Run one from the repository root:
 
-    python -m experiments.r2_factorized_weak
+    python -m experiments.strnadnet_audited_labels
 
 or open it in an editor that understands `# %%` cells (VS Code, PyCharm, Jupytext) with the
 repository root as working directory and step through it.

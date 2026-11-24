@@ -1,20 +1,18 @@
 # %% [markdown]
-# # r5_hardneg_codec
+# # history_weak_pools_flat_head
 #
-# R5: R2 + 6,865 other-species windows as "None" + phone-codec round-trips (AAC / Opus / MP3) on
-# 15 % of clips.
+# R1: strong clips + 47.8k weak songs as candidate sets {file dialect, Unfinished, None} +
+# counterfactual songs + Vizina annotations, real AudioMoth noise, null splices. Flat 7-way head.
 #
-# **Question.** Fewer false alarms on similar trills (Chiffchaff, Chaffinch, ...) and robustness
-# to app audio compression.
+# **Question.** Does the big weakly labelled pool fix the citizen-recording errors (complete songs
+# called Unfinished)?
 #
-# **Status:** done (from the research session). 5 folds: macro-F1 0.761, acc 0.867; -0.013 against
-# R2, P(R2 better) 0.95. None recall +0.048 (the hard negatives work), dialects worse (BC -0.015, XB
-# -0.022, BhBl -0.035). To be retried with a lower share of hard negatives; the codec part cannot
-# show a benefit without phone audio (research log 17.5, device_robustness.py).
+# **Status:** done (from the research session). 5 folds: macro-F1 0.754; vs base_v3 +0.009
+# [-0.009, +0.026], not significant. The weak data only pays off with the factorised head (R2).
 #
-# Run from the repository root with `python -m experiments.r5_hardneg_codec`, or step through the
+# Run from the repository root with `python -m experiments.history_weak_pools_flat_head`, or step through the
 # cells in an editor / Jupyter whose working directory is the repository root. Training writes to
-# `$STRNADI_WS/runs/r5_hardneg_codec/`.
+# `$STRNADI_WS/runs/history_weak_pools_flat_head/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -23,16 +21,15 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'r5_hardneg_codec'
+RUN = 'history_weak_pools_flat_head'
 
 settings = TrainSettings(
     # data
     labelled_table='data/orig_index.csv',
     extra_tables={
-        'data/weak_v3.csv': 0.33,
+        'data/weak_v3.csv': 0.35,
         'data/cf_v3.csv': 0.08,
         'data/vizann_v1.csv': 0.07,
-        'data/hardneg_v1.csv': 0.05,
     },
     noise_bank='data/noise_bank_audiomoth.npy',
     eval_window='start',
@@ -46,14 +43,13 @@ settings = TrainSettings(
     # waveform augmentation
     noise_probability=0.5,
     snr_reference='clip',
-    codec_probability=0.15,
     splice_probability=0.3,
 )
 
 
 # %% Model
 def make_model():
-    return StrnadNet(head='factorized')
+    return StrnadNet()
 
 
 # %% Train: one model per fold (recording-grouped cross-validation)

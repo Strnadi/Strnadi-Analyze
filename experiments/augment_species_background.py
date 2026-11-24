@@ -1,5 +1,5 @@
 # %% [markdown]
-# # r8_species_background
+# # augment_species_background
 #
 # R8: other-species calls mixed into the background of 30 % of training songs, 5-20 dB below the
 # song ending.
@@ -14,9 +14,9 @@
 # **Needs.** processing/clean_noise_bank.py (-> data/noise_bank_clean.npy); data/orig_aligned.csv;
 # data/cf_v4.csv; processing/build_species_bank.py (-> data/species_bank.npy from hardneg_v1.csv)
 #
-# Run from the repository root with `python -m experiments.r8_species_background`, or step through
+# Run from the repository root with `python -m experiments.augment_species_background`, or step through
 # the cells in an editor / Jupyter whose working directory is the repository root. Training writes
-# to `$STRNADI_WS/runs/r8_species_background/`.
+# to `$STRNADI_WS/runs/augment_species_background/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -25,7 +25,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'r8_species_background'
+RUN = 'augment_species_background'
 
 settings = TrainSettings(
     # data

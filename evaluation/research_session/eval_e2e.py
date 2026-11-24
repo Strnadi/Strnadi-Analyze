@@ -92,7 +92,7 @@ if __name__ == '__main__':
     mx = int(sys.argv[3]) if len(sys.argv) > 3 else 10**9
     torch.set_num_threads(int(os.environ.get('THREADS', 4)))
     from training.inference import TorchEnsemble
-    from evaluation.eval_external import TFLiteModel
+    from evaluation.research_session.eval_external import TFLiteModel
 
     model = (
         TFLiteModel(spec, threads=int(os.environ.get('THREADS', 4)))

@@ -1,8 +1,8 @@
 """Train the bird-level model: all songs of a recording -> one dialect.
 
-    fit_bird_level(run_name, make_model, song_run='r2_factorized_weak')
+    fit_bird_level(run_name, make_model, song_run='strnadnet_audited_labels')
 
-Input is `results/song_emb_<song_run>.npz` from `evaluation/embed_songs.py`: per-song embeddings and
+Input is `results/song_emb_<song_run>.npz` from `evaluation/research_session/embed_songs.py`: per-song embeddings and
 class probabilities that are already out of fold (each recording's songs were embedded by the fold
 model that never saw that recording). The recording-level dialect is the bag label.
 

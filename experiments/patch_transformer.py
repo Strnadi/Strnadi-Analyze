@@ -1,28 +1,25 @@
 # %% [markdown]
-# # arch_densenet121
+# # patch_transformer
 #
-# Control: the production backbone (ImageNet DenseNet121, 8.2 M) with the new data, losses and
-# temporal head.
+# Architecture comparison: small patch transformer (3.1 M) from scratch on the R7 recipe.
 #
-# **Question.** Is the production model weak because of its data and training protocol, or because
-# of the architecture?
+# **Question.** Can attention over patches beat convolution here?
 #
-# **Status:** queued (from the research session). Not finished. ~5x the training cost per step of
-# StrnadNet on CPU. See legacy_densenet121.py for the original design (patch pooling instead of a
-# temporal head).
+# **Status:** queued (from the research session). Not finished. Both reviews expect it to lose:
+# 3,744 labelled clips are too few for a transformer from scratch. Low priority.
 #
-# Run from the repository root with `python -m experiments.arch_densenet121`, or step through the
-# cells in an editor / Jupyter whose working directory is the repository root. Training writes to
-# `$STRNADI_WS/runs/arch_densenet121/`.
+# Run from the repository root with `python -m experiments.patch_transformer`, or step
+# through the cells in an editor / Jupyter whose working directory is the repository root.
+# Training writes to `$STRNADI_WS/runs/patch_transformer/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
-from model.timm_temporal import TimmTemporal
+from model.patch_transformer import PatchTransformer
 from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'arch_densenet121'
+RUN = 'patch_transformer'
 
 settings = TrainSettings(
     # data
@@ -42,7 +39,6 @@ settings = TrainSettings(
     samples_per_epoch=6144,
     batch_size=48,
     learning_rate=0.002,
-    backbone_lr_factor=0.1,
     # waveform augmentation
     noise_probability=0.5,
     snr_reference='band',
@@ -52,7 +48,7 @@ settings = TrainSettings(
 
 # %% Model
 def make_model():
-    return TimmTemporal(backbone='densenet121', head='factorized')
+    return PatchTransformer(head='factorized')
 
 
 # %% Train: one model per fold (recording-grouped cross-validation)

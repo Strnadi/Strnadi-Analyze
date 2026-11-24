@@ -8,7 +8,7 @@
 # with long schedules is what makes distillation work; EfficientAT gained +5.3 mAP this way.
 #
 # **Status:** proposed (from review proposal). Not run. Extend to the ~100k unlabelled songs by
-# pseudo-labelling them with the teacher (evaluation/pseudo_label.py) and adding the table to
+# pseudo-labelling them with the teacher (evaluation/research_session/pseudo_label.py) and adding the table to
 # `extra`: pseudo-labels only from a strong teacher.
 #
 # **Needs.** processing/clean_noise_bank.py (-> data/noise_bank_clean.npy); data/orig_aligned.csv;

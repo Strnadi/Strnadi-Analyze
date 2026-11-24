@@ -2,7 +2,7 @@
 # # ssl_hubert_units
 #
 # ssl_hub: HuBERT-style masked prediction of k-means "acoustic units" (the objective behind AVES);
-# doubles as a tokeniser of song elements (evaluation/vq_tokens.py).
+# doubles as a tokeniser of song elements (evaluation/research_session/vq_tokens.py).
 #
 # **Question.** Learned units make song endings clusterable into dialects without labels.
 #

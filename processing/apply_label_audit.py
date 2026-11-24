@@ -2,7 +2,8 @@
 
     python -m processing.apply_label_audit
 
-Reads   data/orig_aligned.csv                  the 4,089 labelled clips, re-cut around the whole song
+Reads   data/orig_aligned.csv                  the 4,089 labelled clips and where each one sits in
+                                               its source recording
         label_audit/clip_label_audit.csv       (in the repository) one row per reviewed clip
 Writes  data/clips_audited.csv                 clips with the audited label, duplicate-free folds
         data/clips_unjudgeable.csv             reviewed clips whose content cannot be decided
@@ -11,15 +12,28 @@ Writes  data/clips_audited.csv                 clips with the audited label, dup
 Columns added: `label_original` (the label as delivered), `audit` (not_reviewed / confirmed /
 relabelled / unjudgeable). `label` is the audited label. The rules of the audit are in
 docs/LABEL_AUDIT.md. Pre-baked augmented copies (`aug`) are dropped.
+
+**The window of a clip is the clip as it was labelled**, not the window `realign_orig.py` re-cut
+around the detected song. A label describes what the labeller saw. The re-cut windows broke that in
+two ways the second audit round made visible: some were placed on a neighbouring sound, after the
+song (the models then answered "None", correctly), and some revealed a terminal element beyond the
+labelled clip's end (an "Unfinished" label on a complete song). Where the clip was located in its
+source recording, the table window is the clip with 0.2 s of real audio on either side, which gives
+training its random time shift; evaluation uses the centre, i.e. exactly the labelled 4 s.
 """
 
+import glob
 import os
 
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedGroupKFold
 
-from config import workspace_path
+from config import WS, workspace_path
 from processing.make_folds import RANK, duplicate_groups
+
+CLIP_SECONDS = 4.0
+CONTEXT_SECONDS = 0.2  # real audio kept on either side of a located clip
 
 REPOSITORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AUDIT_TABLE = os.path.join(REPOSITORY, 'label_audit', 'clip_label_audit.csv')
@@ -31,10 +45,47 @@ def audited_clips():
     clips = clips[~clips.aug].copy()
     audit = pd.read_csv(AUDIT_TABLE, keep_default_na=False).set_index('name')
 
+    clips = labelled_windows(clips)
+
     clips['label_original'] = clips.label
     clips['audit'] = clips.name.map(audit.verdict).fillna('not_reviewed')
     relabelled = clips.audit == 'relabelled'
     clips.loc[relabelled, 'label'] = clips.name[relabelled].map(audit.label_audited)
+    return clips
+
+
+def labelled_windows(clips):
+    """Point every row at the clip as it was labelled (see the module docstring).
+
+    Rows located in their source recording with a correlation of at least 0.9 become a 4.4 s window
+    of that recording centred on the clip; all others keep the delivered 4 s clip file.
+    """
+    # recording id (e.g. 'F000090') -> its decoded file, whatever the original extension was
+    archive = {
+        os.path.basename(path).split('.')[0].upper(): path
+        for path in glob.glob(f'{WS}/audio32k/ncs/*.npy')
+    }
+    clip_files = pd.read_csv(workspace_path('data/orig_index.csv'), keep_default_na=False)
+    clip_file_of = dict(zip(clip_files.name, clip_files.npy))
+
+    files, starts, ends = [], [], []
+    for clip in clips.itertuples():
+        correlation = pd.to_numeric(clip.align_corr, errors='coerce')
+        offset = pd.to_numeric(clip.src_off, errors='coerce')
+        source = archive.get(clip.name.split('.')[0].upper())
+        located = clip.src == 'ncs' and source is not None and correlation >= 0.9
+
+        if located:
+            files.append(source)
+            starts.append(offset - CONTEXT_SECONDS)
+            ends.append(offset + CLIP_SECONDS + CONTEXT_SECONDS)
+        else:
+            files.append(clip_file_of[clip.name])
+            starts.append(0.0)
+            ends.append(CLIP_SECONDS)
+
+    clips['npy'], clips['t0'], clips['t1'] = files, np.round(starts, 4), np.round(ends, 4)
+    clips['in_source'] = [end - start > CLIP_SECONDS for start, end in zip(starts, ends)]
     return clips
 
 

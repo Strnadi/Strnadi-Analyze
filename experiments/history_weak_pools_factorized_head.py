@@ -1,5 +1,5 @@
 # %% [markdown]
-# # r2_factorized_weak
+# # history_weak_pools_factorized_head
 #
 # R2: R1 + factorised head. Weak file-level labels train only the dialect factor, weighted by
 # p(complete).
@@ -14,9 +14,9 @@
 # defects: black-patch counterfactual filler (cf_v3), clip-power SNR, 20 % of strong clips
 # starting mid-song. Complete-vs-Unfinished AUC: BhBl 0.83, BlBh 0.89, BC 0.93, BE 0.95, XB 0.98.
 #
-# Run from the repository root with `python -m experiments.r2_factorized_weak`, or step through
+# Run from the repository root with `python -m experiments.history_weak_pools_factorized_head`, or step through
 # the cells in an editor / Jupyter whose working directory is the repository root. Training writes
-# to `$STRNADI_WS/runs/r2_factorized_weak/`.
+# to `$STRNADI_WS/runs/history_weak_pools_factorized_head/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -25,7 +25,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'r2_factorized_weak'
+RUN = 'history_weak_pools_factorized_head'
 
 settings = TrainSettings(
     # data

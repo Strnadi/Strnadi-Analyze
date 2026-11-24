@@ -11,7 +11,7 @@ measured SNRs); count how often the prediction moves to BhBl. Compare a model tr
 (e.g. base_v3) with one trained with it (R6): a clearly higher BhBl rate is the shortcut.
 The same degraded clips also give the far-field robustness of each model (how many stay correct).
 
-Usage: python -m evaluation.dialect_prior_shift <run> [<run> ...] [--noise data/noise_bank_clean.npy] [--n 400]
+Usage: python -m evaluation.research_session.dialect_prior_shift <run> [<run> ...] [--noise data/noise_bank_clean.npy] [--n 400]
 """
 
 import argparse

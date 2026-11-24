@@ -36,7 +36,7 @@
   catch a behaviour change in a script that builds training data, so a hand rewrite was not worth the
   risk. They still use the research session's terse variable names.
 - **New scripts:** `processing/clean_noise_bank.py`, `build_species_bank.py`, `build_disputed.py`,
-  `make_folds.py` (rewritten), `cut_songs.py`; `evaluation/dialect_prior_shift.py`,
+  `make_folds.py` (rewritten), `cut_songs.py`; `evaluation/research_session/dialect_prior_shift.py`,
   `embed_songs.py`, `rescore_oof.py`.
 - **`layers/perch_encoder.py`** (PyTorch port of Perch 2.0) and **`model/efficientat_temporal.py`**:
   written from the projects' READMEs; they need a download / a clone. Run `tests/check_perch.py`

@@ -44,6 +44,7 @@ def mel_weights(sr, n_fft, n_bins, fmin, fmax):
 class MelFilterbank(nn.Module):
     def __init__(self, n_bins=128, fmin=1500.0, fmax=11000.0, n_fft=1024, sr=32000):
         super().__init__()
+        self.fmin, self.fmax = fmin, fmax  # band edges in Hz (used to label plots)
         weights = mel_weights(sr, n_fft, n_bins, fmin, fmax)
         # only the STFT bins that some filter uses are needed: [first, last + 1)
         used_fft_bins = np.nonzero(weights.sum(0) > 0)[0]

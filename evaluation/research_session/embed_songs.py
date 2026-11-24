@@ -6,7 +6,7 @@ Each song is scored by the fold model that never saw its recording (folds from t
 Writes results/song_emb_<run>.npz with arrays emb (S, D), prob (S, 7), rec (S,), fold (S,), and the
 recording-level label per song (`bag_label`: the single dialect in the song's candidate set, or '').
 
-Usage: python -m evaluation.embed_songs <run> [--table data/weak_v5.csv]
+Usage: python -m evaluation.research_session.embed_songs <run> [--table data/weak_v5.csv]
 """
 
 import argparse

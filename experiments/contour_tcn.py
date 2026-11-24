@@ -1,5 +1,5 @@
 # %% [markdown]
-# # arch_contour_tcn
+# # contour_tcn
 #
 # Architecture comparison: 1-D TCN over top-3 pitch-contour features (0.27 M params, ~5x cheaper
 # than StrnadNet).
@@ -10,9 +10,9 @@
 # **Status:** queued (from the research session). Not finished. See contour_ridge.py for the sub-
 # bin variant.
 #
-# Run from the repository root with `python -m experiments.arch_contour_tcn`, or step through the
+# Run from the repository root with `python -m experiments.contour_tcn`, or step through the
 # cells in an editor / Jupyter whose working directory is the repository root. Training writes to
-# `$STRNADI_WS/runs/arch_contour_tcn/`.
+# `$STRNADI_WS/runs/contour_tcn/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -21,7 +21,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'arch_contour_tcn'
+RUN = 'contour_tcn'
 
 settings = TrainSettings(
     # data

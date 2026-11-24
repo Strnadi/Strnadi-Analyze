@@ -237,7 +237,7 @@ Later the same day it took in the research session's afternoon round:
 - `processing/audio_repair.py`, used by the loader and by the service: identical samples to the
   research loader on 240 real windows. `load_seg(..., raw=True)` is the old behaviour, needed to
   reproduce stored predictions.
-- `evaluation/explain.py context`, two new QA sheets, the flip report in
+- `evaluation/research_session/explain.py context`, two new QA sheets, the flip report in
   `evaluation/rescore_oof.py`.
 - `serving/export_tflite.py` and `tests/check_tflite.py`: run on R2 fold 0 (float32 and float16
   agree with PyTorch on all 200 clips; int8 on 99.5 %). The converter gets a copy of the ONNX
@@ -357,7 +357,7 @@ comparison can be 5 folds x 3 seeds, and large pretrained encoders can be fine-t
      keep one test set untouched (the app export, when it exists).
 2. **Fix the data defects** and re-run R2 on the corrected recipe
    (`experiments/clean_noise_ending_snr.py`). Measure the passive-recorder shortcut with
-   `evaluation/dialect_prior_shift.py` before using any JCU-trained model on passive data.
+   `evaluation/research_session/dialect_prior_shift.py` before using any JCU-trained model on passive data.
 3. **A strong teacher.** Fine-tune pretrained encoders with the weak-label recipe (section 7A).
    Rank frozen encoders by probing first (minutes each), then fine-tune the best two or three.
 4. **Completeness-specific modelling** (section 7B-7E), each as an ablation against step 2.

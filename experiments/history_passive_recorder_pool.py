@@ -1,5 +1,5 @@
 # %% [markdown]
-# # r6_jcu_weak
+# # history_passive_recorder_pool
 #
 # R6: R2 + 38k weak songs {BhBl, Unfinished, None} from 28 JCU AudioMoth recorders (passive, far-
 # field).
@@ -11,11 +11,11 @@
 # passive-recorder training song is constrained to BhBl, so "passive acoustics => BhBl" is a
 # learnable shortcut, and the JCU "wrong-dialect rate" metric rewards it; this is the main risk for
 # the Italian data. (2) JCU test recorders sit 120-170 m from training recorders. Check with
-# evaluation/dialect_prior_shift.py before trusting it.
+# evaluation/research_session/dialect_prior_shift.py before trusting it.
 #
-# Run from the repository root with `python -m experiments.r6_jcu_weak`, or step through the cells
+# Run from the repository root with `python -m experiments.history_passive_recorder_pool`, or step through the cells
 # in an editor / Jupyter whose working directory is the repository root. Training writes to
-# `$STRNADI_WS/runs/r6_jcu_weak/`.
+# `$STRNADI_WS/runs/history_passive_recorder_pool/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -24,7 +24,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'r6_jcu_weak'
+RUN = 'history_passive_recorder_pool'
 
 settings = TrainSettings(
     # data

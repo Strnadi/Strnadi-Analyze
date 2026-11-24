@@ -1,5 +1,5 @@
 # %% [markdown]
-# # r7_visual_qa_fixes
+# # history_recut_windows
 #
 # R7: R2 + the fixes found by looking at spectrograms: strong clips re-cut around the whole song
 # (2,740 windows moved), counterfactual truncations filled with spectrally matched background
@@ -15,9 +15,9 @@
 # contains Yellowhammer songs; BirdNET-app clips stay unaligned, so window placement correlates with
 # class.
 #
-# Run from the repository root with `python -m experiments.r7_visual_qa_fixes`, or step through
+# Run from the repository root with `python -m experiments.history_recut_windows`, or step through
 # the cells in an editor / Jupyter whose working directory is the repository root. Training writes
-# to `$STRNADI_WS/runs/r7_visual_qa_fixes/`.
+# to `$STRNADI_WS/runs/history_recut_windows/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -26,7 +26,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'r7_visual_qa_fixes'
+RUN = 'history_recut_windows'
 
 settings = TrainSettings(
     # data

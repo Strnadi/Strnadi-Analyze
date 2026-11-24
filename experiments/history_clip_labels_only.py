@@ -1,5 +1,5 @@
 # %% [markdown]
-# # base_v3_strong_only
+# # history_clip_labels_only
 #
 # Baseline: StrnadNet (0.9 M params) on the 3,744 human-labelled clips only, recording-grouped
 # 5-fold CV.
@@ -14,9 +14,9 @@
 # label-smoothing floor by epoch ~12 while held-out F1 is flat from epoch 4-8: the labelled set is
 # memorised.
 #
-# Run from the repository root with `python -m experiments.base_v3_strong_only`, or step through
+# Run from the repository root with `python -m experiments.history_clip_labels_only`, or step through
 # the cells in an editor / Jupyter whose working directory is the repository root. Training writes
-# to `$STRNADI_WS/runs/base_v3_strong_only/`.
+# to `$STRNADI_WS/runs/history_clip_labels_only/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -25,7 +25,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'base_v3_strong_only'
+RUN = 'history_clip_labels_only'
 
 settings = TrainSettings(
     # data

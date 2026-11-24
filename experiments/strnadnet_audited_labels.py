@@ -37,7 +37,7 @@ settings = TrainSettings(
         'data/vizann_v1.csv': 0.07,
     },
     noise_bank='data/noise_bank_clean.npy',
-    eval_window='start',
+    eval_window='center',
     # optimisation
     epochs=25,
     samples_per_epoch=6144,

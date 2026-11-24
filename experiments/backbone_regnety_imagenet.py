@@ -1,25 +1,25 @@
 # %% [markdown]
-# # arch_patch_transformer
+# # backbone_regnety_imagenet
 #
-# Architecture comparison: small patch transformer (3.1 M) from scratch on the R7 recipe.
+# Architecture comparison: ImageNet RegNetY-004 (5.1 M) + shared temporal head on the R7 recipe.
 #
-# **Question.** Can attention over patches beat convolution here?
+# **Question.** Another mobile-class CNN family, for the size / accuracy curve.
 #
-# **Status:** queued (from the research session). Not finished. Both reviews expect it to lose:
-# 3,744 labelled clips are too few for a transformer from scratch. Low priority.
+# **Status:** queued (from the research session). Not finished. Backbone learning rate corrected
+# to 0.1x.
 #
-# Run from the repository root with `python -m experiments.arch_patch_transformer`, or step
-# through the cells in an editor / Jupyter whose working directory is the repository root.
-# Training writes to `$STRNADI_WS/runs/arch_patch_transformer/`.
+# Run from the repository root with `python -m experiments.backbone_regnety_imagenet`, or step through the
+# cells in an editor / Jupyter whose working directory is the repository root. Training writes to
+# `$STRNADI_WS/runs/backbone_regnety_imagenet/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
-from model.patch_transformer import PatchTransformer
+from model.timm_temporal import TimmTemporal
 from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'arch_patch_transformer'
+RUN = 'backbone_regnety_imagenet'
 
 settings = TrainSettings(
     # data
@@ -39,6 +39,7 @@ settings = TrainSettings(
     samples_per_epoch=6144,
     batch_size=48,
     learning_rate=0.002,
+    backbone_lr_factor=0.1,
     # waveform augmentation
     noise_probability=0.5,
     snr_reference='band',
@@ -48,7 +49,7 @@ settings = TrainSettings(
 
 # %% Model
 def make_model():
-    return PatchTransformer(head='factorized')
+    return TimmTemporal(backbone='regnety_004', head='factorized')
 
 
 # %% Train: one model per fold (recording-grouped cross-validation)

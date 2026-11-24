@@ -1,5 +1,5 @@
 # %% [markdown]
-# # r3_far_field
+# # augment_far_field
 #
 # R3: R7 + far-field simulation (distance-scaled treble loss, reverberation, measured SNR) on 30 %
 # of clips.
@@ -11,9 +11,9 @@
 #
 # **Needs.** data/farfield_stats.csv (processing: BioDCASE 2025 Task 3 playback statistics)
 #
-# Run from the repository root with `python -m experiments.r3_far_field`, or step through the
+# Run from the repository root with `python -m experiments.augment_far_field`, or step through the
 # cells in an editor / Jupyter whose working directory is the repository root. Training writes to
-# `$STRNADI_WS/runs/r3_far_field/`.
+# `$STRNADI_WS/runs/augment_far_field/`.
 
 # %% Imports
 from evaluation.report import plot_error_examples, plot_run, summarize_run
@@ -22,7 +22,7 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'r3_far_field'
+RUN = 'augment_far_field'
 
 settings = TrainSettings(
     # data

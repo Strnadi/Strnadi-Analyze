@@ -75,7 +75,7 @@ STRNADI_DRY_RUN=1 python -m experiments.frontend_pcen # build the model, stop be
 
 python -m evaluation.report <run>                     # the evaluation cells for any finished run
 python -m evaluation.compare_runs <runA> <runB>       # paired recording bootstrap
-evaluation/post_eval.sh <run>                         # external test sets as well
+evaluation/research_session/post_eval.sh <run>                         # external test sets as well
 python -m serving.export_onnx <run_dir> model.onnx    # export + parity check (backend)
 python -m serving.export_tflite model.onnx            # phone build; needs onnx2tf + TensorFlow
 python -m tests.check_tflite <run_dir> model_tflite/*.tflite   # the same parity check for the phone build
@@ -108,7 +108,7 @@ Code style: `uvx ruff format .` (settings in `pyproject.toml`).
   song_t0, song_t1`). A label is a class, a candidate set (`BC|Unfinished|None`) or `soft`.
 - Splits are always by recording (or coarser), never by clip; the test fold is never used to choose
   anything.
-- Look at spectrograms (`plot_error_examples`, `evaluation/qa_sheets.py`) of every new table,
+- Look at spectrograms (`plot_error_examples`, `evaluation/research_session/qa_sheets.py`) of every new table,
   augmentation or surprising number before building on it.
 
 ## Where things stand
