@@ -40,13 +40,21 @@ def load_run_predictions(run):
 
     parts = []
     table = None
+    by_name = None
     for path in fold_files:
         fold_result = np.load(path, allow_pickle=True)
         if table is None:
             table = read_table(_labelled_table_of(run_dir, fold_result))
 
-        clips = table.loc[fold_result['idx']].copy()
-        probabilities = fold_result['p']
+        # Rows are matched by clip name, so a run stays scorable after a later audit round has
+        # removed or relabelled clips: it is then scored against the current labels, and clips
+        # that are no longer in the table are left out.
+        if by_name is None:
+            by_name = table.reset_index().set_index('name')
+        still_there = np.isin(fold_result['name'], by_name.index)
+        clips = by_name.loc[fold_result['name'][still_there]].reset_index().set_index('index')
+        clips.index.name = None
+        probabilities = fold_result['p'][still_there]
         for index, name in enumerate(CLASSES):
             clips[f'p_{name}'] = probabilities[:, index]
         clips['predicted'] = [CLASSES[i] for i in probabilities.argmax(1)]

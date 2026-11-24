@@ -72,6 +72,8 @@ def main():
 
     rows = [describe_run(run_dir, labelled_table) for run_dir in sorted(glob.glob(f'{WS}/runs/*'))]
     rows = sorted([row for row in rows if row], key=lambda row: -row['accuracy'])
+    if write_doc:
+        rows = [row for row in rows if row['folds'] == 5]  # unfinished runs stay out of the document
 
     header = ['run', 'folds', 'params (M)', 'accuracy', 'fold sd', 'macro-F1'] + CLASSES
     separator = ' | ' if markdown else '  '
