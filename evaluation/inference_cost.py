@@ -37,16 +37,27 @@ def fastest(function, repetitions=30):
 def cost_of(run):
     model = load_model(f'{WS}/runs/{effective_run_name(run)}/fold0/model.pt')
     waveform = torch.randn(1, 128000) * 0.1
-    spectrogram = model.frontend(waveform)
-
-    with FlopCounterMode(display=False) as counter:
-        model(spectrogram)
     parameters = sum(value.numel() for value in model.parameters())
+
+    # Models that compute their own input from the audio are timed as a whole.
+    takes_waveform = getattr(model, 'wave_input', False) or getattr(model, 'frontend', None) is None
+    if takes_waveform:
+        network_input, frontend_ms = waveform, 0.0
+    else:
+        network_input = model.frontend(waveform)
+        frontend_ms = fastest(lambda: model.frontend(waveform))
+
+    try:
+        with FlopCounterMode(display=False) as counter:
+            model(network_input)
+        gmacs = counter.get_total_flops() / 1e9
+    except Exception:  # an operator the counter does not know
+        gmacs = float('nan')
     return {
         'parameters_m': parameters / 1e6,
-        'network_gmacs': counter.get_total_flops() / 1e9,
-        'frontend_ms': fastest(lambda: model.frontend(waveform)),
-        'network_ms': fastest(lambda: model(spectrogram)),
+        'network_gmacs': gmacs,
+        'frontend_ms': frontend_ms,
+        'network_ms': fastest(lambda: model(network_input)),
     }
 
 

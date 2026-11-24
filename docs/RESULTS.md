@@ -102,6 +102,14 @@ of the best; (2) what else the model provides (element sequence, embedding, trai
 songs); (3) evidence still to come, above all a test set of phone recordings, which is where the
 recipes could actually differ.
 
+### Scorecard: accuracy, robustness, size and speed together
+
+`python -m tools.model_scorecard --write-doc` (speed is one CPU thread; ordered from fastest).
+`=` accuracy within 0.005 of the best; `*` no other run is both as accurate and faster.
+
+<!-- scorecard: begin -->
+<!-- scorecard: end -->
+
 ## The model that ships
 
 `experiments/strnadnet_field_ready.py` (the recipe) and `experiments/train_shipped_model.py`
