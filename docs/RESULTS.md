@@ -76,6 +76,32 @@ below about half a point of accuracy, or one point of macro-F1, are noise.
   between nothing and 0.8 points on this test set, and together half a point; see their sections
   for why they are in the shipped recipe anyway.
 
+## Choosing between models that score alike
+
+Most recipes and sizes are within seed noise of each other on the clean clips, and averaging five
+or ten of them gains only 0.4 points of accuracy (126-130 errors against 139): they make the same
+mistakes. 64 clips are wrong in all ten runs compared.
+
+`python -m evaluation.stress_test <runs>` degrades the held-out clips in ways no model was trained
+on. It does not separate them either:
+
+| Condition | reference | reference, seed 1 | field augmentation | shipped recipe | 0.19 M | 2.9 M | clip labels only |
+|---|---|---|---|---|---|---|---|
+| clean | 0.961 | 0.961 | 0.959 | 0.957 | 0.955 | 0.962 | 0.958 |
+| pink noise, 10 dB | 0.953 | 0.953 | 0.950 | 0.950 | 0.947 | 0.953 | 0.949 |
+| pink noise, 5 dB | 0.937 | 0.938 | 0.937 | 0.929 | 0.934 | 0.935 | 0.936 |
+| pink noise, 0 dB | 0.895 | 0.903 | 0.897 | 0.895 | 0.891 | 0.894 | 0.901 |
+| low-pass 6 kHz: complete songs given a wrong dialect | 0.068 | 0.062 | 0.057 | 0.062 | 0.068 | 0.056 | 0.042 |
+
+All of them lose about 6 points at 0 dB and, when the band of the terminal elements is removed,
+fall back to "Unfinished" for half the complete songs rather than guessing (wrong dialect: 4-7 %).
+The field augmentations show no advantage under these synthetic degradations.
+
+So the choice is made on other grounds, in this order: (1) the smallest model that is within noise
+of the best; (2) what else the model provides (element sequence, embedding, training on phone-domain
+songs); (3) evidence still to come, above all a test set of phone recordings, which is where the
+recipes could actually differ.
+
 ## The model that ships
 
 `experiments/strnadnet_field_ready.py` (the recipe) and `experiments/train_shipped_model.py`
