@@ -45,7 +45,10 @@ def describe_run(run_dir, labelled_table):
     probabilities = predictions[[f'p_{name}' for name in CLASSES]].values
     result = metrics(labels, probabilities)
     per_fold = [
-        metrics(labels[(predictions.cv_fold == fold).values], probabilities[(predictions.cv_fold == fold).values])['acc']
+        metrics(
+            labels[(predictions.cv_fold == fold).values],
+            probabilities[(predictions.cv_fold == fold).values],
+        )['acc']
         for fold in sorted(predictions.cv_fold.unique())
     ]
     return {

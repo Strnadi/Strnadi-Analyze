@@ -7,7 +7,8 @@
 # **Question.** Kernels that adapt along frequency fit absolute-pitch patterns better than one
 # shared kernel plus a coordinate channel.
 #
-# **Status:** proposed (from review proposal). Not run.
+# **Status:** rerun (from review proposal). Re-targeted on 2026-11-24 to the audited clips, the clean
+# noise bank and best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. Not run.
 #
 # **Needs.** processing/clean_noise_bank.py (-> data/noise_bank_clean.npy); data/orig_aligned.csv;
 # data/cf_v4.csv
@@ -27,7 +28,7 @@ RUN = 'fdy_crnn'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_aligned.csv',
+    labelled_table='data/clips_audited.csv',
     extra_tables={
         'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
@@ -35,8 +36,6 @@ settings = TrainSettings(
     },
     noise_bank='data/noise_bank_clean.npy',
     eval_window='center',
-    # protocol
-    checkpoint_rule='inner_smooth3',
     # optimisation
     epochs=25,
     samples_per_epoch=6144,

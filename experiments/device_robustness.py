@@ -7,7 +7,8 @@
 # least; Freq-MixStyle + impulse-response augmentation took unseen-device accuracy from 48 % to 59
 # % in the cited DCASE study.
 #
-# **Status:** proposed (from the research session). Not run (research backlog item 9). Needs the
+# **Status:** rerun (from the research session). Re-targeted on 2026-11-24 to the audited clips, the clean
+# noise bank and best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. Not run (research backlog item 9). Needs the
 # app-database export to measure properly.
 #
 # **Needs.** processing/clean_noise_bank.py (-> data/noise_bank_clean.npy); data/orig_aligned.csv;
@@ -28,7 +29,7 @@ RUN = 'device_robustness'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_aligned.csv',
+    labelled_table='data/clips_audited.csv',
     extra_tables={
         'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
@@ -36,8 +37,6 @@ settings = TrainSettings(
     },
     noise_bank='data/noise_bank_clean.npy',
     eval_window='center',
-    # protocol
-    checkpoint_rule='inner_smooth3',
     # optimisation
     epochs=25,
     samples_per_epoch=6144,

@@ -1,6 +1,6 @@
 """The training-time waveform augmentation chain.
 
-Order: speed -> device EQ -> far-field -> noise -> other species -> codec -> null splice -> polarity
+Order: speed -> device EQ -> far-field -> noise -> other species -> second song -> codec -> null splice -> polarity
 -> peak normalisation. Peak normalisation (to 0.5) is applied to every clip, in training and at
 inference alike.
 """
@@ -39,16 +39,19 @@ class WaveAugment:
         far_field_csv: table of measured far-field profiles (needed only for far-field simulation).
     """
 
-    def __init__(self, settings, noise_bank=None, species_bank=None, far_field_csv=None):
+    def __init__(
+        self, settings, noise_bank=None, species_bank=None, far_field_csv=None, song_bank=None
+    ):
         self.settings = settings
         self.noise_bank = noise_bank
         self.species_bank = species_bank
+        self.song_bank = song_bank
 
         self.far_field_profiles = []
         if far_field_csv and settings.far_field_probability > 0:
             self.far_field_profiles = load_profiles(far_field_csv)
 
-    def __call__(self, waveform, force_noise=False):
+    def __call__(self, waveform, force_noise=False, may_add_song=False):
         """Return an augmented, peak-normalised copy of `waveform` (same length)."""
         settings = self.settings
         n_samples = len(waveform)
@@ -77,6 +80,14 @@ class WaveAugment:
         if self.species_bank is not None and happens(settings.species_probability):
             other_species = draw_chunk(self.species_bank, n_samples)
             waveform = species_mix(waveform, other_species)
+
+        # "Mixup of two songs", kept label-safe: the added bird is quieter and its song is
+        # unfinished, so the mixture still has the label of the foreground clip. The caller sets
+        # `may_add_song` only for clips that contain a Yellowhammer (a "None" clip would stop
+        # being "None").
+        add_song = may_add_song and self.song_bank is not None
+        if add_song and happens(settings.background_song_probability):
+            waveform = species_mix(waveform, draw_chunk(self.song_bank, n_samples))
 
         if happens(settings.codec_probability):
             waveform = codec_roundtrip(waveform)

@@ -149,7 +149,9 @@ def draw_sheets(clips, out_dir, band_khz=(2.0, 10.0)):
         figure, axes = plt.subplots(5, 2, figsize=(18, 13), squeeze=False)
         for ax in axes.ravel():
             ax.axis('off')
-        for ax, clip in zip(axes.ravel(), clips.iloc[first : first + PANELS_PER_SHEET].itertuples()):
+        for ax, clip in zip(
+            axes.ravel(), clips.iloc[first : first + PANELS_PER_SHEET].itertuples()
+        ):
             ax.axis('on')
             title = (
                 f'#{clip.review_id}  label={clip.label}  models={clip.predicted}'
@@ -189,9 +191,20 @@ def main():
 
     out_dir = workspace_path(arguments.out)
     draw_sheets(review, out_dir)
-    columns = ['review_id', 'kind', 'name', 'label', 'predicted', 'confidence', 'p_label', 'verdict']
+    columns = [
+        'review_id',
+        'kind',
+        'name',
+        'label',
+        'predicted',
+        'confidence',
+        'p_label',
+        'verdict',
+    ]
     review[columns].to_csv(f'{out_dir}/review.csv', index=False)
-    print(f'{len(disputed)} disputed clips, {len(review) - len(disputed)} control clips -> {out_dir}')
+    print(
+        f'{len(disputed)} disputed clips, {len(review) - len(disputed)} control clips -> {out_dir}'
+    )
 
 
 if __name__ == '__main__':

@@ -339,6 +339,7 @@ class FoldTraining:
             settings,
             noise_bank=_load_bank(settings.noise_bank),
             species_bank=_load_bank(settings.species_bank),
+            song_bank=_load_bank(settings.song_bank),
             far_field_csv=f'{WS}/data/farfield_stats.csv',
         )
 
@@ -389,7 +390,9 @@ class FoldTraining:
         self.inner_labels = self.inner_validation.label.map(C2I).values
 
         # The evaluation windows never change: read them once and keep them in memory.
-        self.inner_waveforms = load_eval_waveforms(self.inner_validation, settings, self.input_store)
+        self.inner_waveforms = load_eval_waveforms(
+            self.inner_validation, settings, self.input_store
+        )
         self.test_waveforms = load_eval_waveforms(self.test, settings, self.input_store)
 
     def _loader_options(self):

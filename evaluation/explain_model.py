@@ -163,7 +163,9 @@ def frequency_ticks(frontend_band, n_bins, mel_scale=True):
 
     scale = to_mel if mel_scale else (lambda hz: hz)
     low, high = scale(frontend_band[0]), scale(frontend_band[1])
-    shown = [khz for khz in (2, 3, 4, 5, 6, 8, 10) if frontend_band[0] <= khz * 1000 <= frontend_band[1]]
+    shown = [
+        khz for khz in (2, 3, 4, 5, 6, 8, 10) if frontend_band[0] <= khz * 1000 <= frontend_band[1]
+    ]
     positions = [(scale(khz * 1000) - low) / (high - low) * n_bins for khz in shown]
     return positions, [str(khz) for khz in shown]
 
@@ -177,12 +179,17 @@ def draw_explanation_row(axes, spectrogram, maps, intact, clip, frontend_band):
     predicted = CLASSES[int(probabilities.argmax())]
     mark = 'correct' if predicted == clip.label else 'WRONG'
 
-    axes[0].imshow(picture, origin='lower', aspect='auto', extent=extent, cmap='magma', vmin=0, vmax=2)
+    axes[0].imshow(
+        picture, origin='lower', aspect='auto', extent=extent, cmap='magma', vmin=0, vmax=2
+    )
     attention = intact['attention']
     time_axis = np.linspace(0, 4.0, len(attention))
     low, high = extent[2], extent[3]
     axes[0].plot(
-        time_axis, low + (high - low) * 0.25 * attention / max(attention.max(), 1e-9), color='c', lw=1
+        time_axis,
+        low + (high - low) * 0.25 * attention / max(attention.max(), 1e-9),
+        color='c',
+        lw=1,
     )
     axes[0].set_title(
         f'label {clip.label} | model {predicted} ({probabilities.max():.2f}) {mark}',
@@ -192,7 +199,9 @@ def draw_explanation_row(axes, spectrogram, maps, intact, clip, frontend_band):
 
     largest = max(float(np.abs(maps[question]).max()) for question in QUESTIONS)
     for ax, question in zip(axes[1:], QUESTIONS):
-        ax.imshow(picture, origin='lower', aspect='auto', extent=extent, cmap='gray', vmin=0, vmax=2)
+        ax.imshow(
+            picture, origin='lower', aspect='auto', extent=extent, cmap='gray', vmin=0, vmax=2
+        )
         ax.imshow(
             maps[question],
             origin='lower',
@@ -284,7 +293,9 @@ def deletion_test(predictions, fold_models, n_clips, out_dir, board):
         maps, intact = occlusion_maps(model, spectrogram)
         patches = patch_grid(*spectrogram.shape[-2:])
 
-        importance = [maps['complete'][first_bin, first_frame] for first_bin, first_frame in patches]
+        importance = [
+            maps['complete'][first_bin, first_frame] for first_bin, first_frame in patches
+        ]
         ranked = [patches[index] for index in np.argsort(importance)[::-1]]
         shuffled = [patches[index] for index in rng.permutation(len(patches))]
 
@@ -302,7 +313,9 @@ def deletion_test(predictions, fold_models, n_clips, out_dir, board):
 
         # where the top patch is, relative to the attention-weighted centre of the song
         attention = intact['attention']
-        song_centre = float((attention * np.linspace(0, 4.0, len(attention))).sum() / attention.sum())
+        song_centre = float(
+            (attention * np.linspace(0, 4.0, len(attention))).sum() / attention.sum()
+        )
         relative_times.append((ranked[0][1] + PATCH_FRAMES / 2) * 0.01 - song_centre)
 
     result = {'n_clips': len(complete)}
@@ -324,7 +337,11 @@ def deletion_test(predictions, fold_models, n_clips, out_dir, board):
     left.set_title(f'{len(complete)} correctly classified complete songs', fontsize=9)
     left.legend(fontsize=8)
     names = list(result[f'by_dialect_hiding_{N_HIDDEN[-1]}_top'])
-    right.bar(names, [result[f'by_dialect_hiding_{N_HIDDEN[-1]}_top'][name] for name in names], color='#c0392b')
+    right.bar(
+        names,
+        [result[f'by_dialect_hiding_{N_HIDDEN[-1]}_top'][name] for name in names],
+        color='#c0392b',
+    )
     right.set_ylim(0, 1)
     right.set_title(f'by dialect, {N_HIDDEN[-1]} most important patches hidden', fontsize=9)
     figure.tight_layout()
@@ -353,8 +370,14 @@ def main():
     predictions = load_run_predictions(arguments.run)
     fold_models = FoldModels(arguments.run, device)
 
-    result = {'sheets': explanation_sheets(run, predictions, fold_models, arguments.per_class, out_dir, board)}
-    result['deletion_test'] = deletion_test(predictions, fold_models, arguments.deletion, out_dir, board)
+    result = {
+        'sheets': explanation_sheets(
+            run, predictions, fold_models, arguments.per_class, out_dir, board
+        )
+    }
+    result['deletion_test'] = deletion_test(
+        predictions, fold_models, arguments.deletion, out_dir, board
+    )
     board.close()
 
     with open(f'{WS}/results/explain_{run}.json', 'w') as file:

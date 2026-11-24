@@ -7,7 +7,8 @@
 # **Question.** The "ornithologist's view" (pitch tracks only) is enough, at a fraction of the
 # cost.
 #
-# **Status:** queued (from the research session). Not finished. See contour_ridge.py for the sub-
+# **Status:** rerun (from the research session). Re-targeted on 2026-11-24 to the audited clips, the clean
+# noise bank and best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. Not finished. See contour_ridge.py for the sub-
 # bin variant.
 #
 # Run from the repository root with `python -m experiments.contour_tcn`, or step through the
@@ -25,17 +26,14 @@ RUN = 'contour_tcn'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_aligned.csv',
+    labelled_table='data/clips_audited.csv',
     extra_tables={
         'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
         'data/vizann_v1.csv': 0.07,
     },
-    noise_bank='data/noise_bank_audiomoth.npy',
-    eval_window='start',
-    # protocol
-    folds=[0, 1, 2],
-    checkpoint_rule='inner_argmax',
+    noise_bank='data/noise_bank_clean.npy',
+    eval_window='center',
     # optimisation
     epochs=25,
     samples_per_epoch=6144,

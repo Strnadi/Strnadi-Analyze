@@ -31,6 +31,8 @@ class TrainSettings:
     noise_bank: str | None = None
     #: Bank of other-species vocalisations (.npy) mixed into the background.
     species_bank: str | None = None
+    #: Bank of unfinished Yellowhammer songs (.npy) mixed in as a second, quieter bird.
+    song_bank: str | None = None
 
     #: What the model is fed: 'wave' (audio), or cached Perch embeddings
     #: ('perch_pooled' = one 1536-d vector per clip, 'perch_spatial' = a 16-step series).
@@ -94,6 +96,8 @@ class TrainSettings:
     splice_probability: float = 0.0
     species_probability: float = 0.0
     random_eq_probability: float = 0.0
+    #: A second, quieter Yellowhammer in the background (never added to a "None" clip).
+    background_song_probability: float = 0.0
 
     # ----------------------------------------------------------------- spectrogram augmentation
     freq_masks: int = 2

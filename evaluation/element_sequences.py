@@ -109,12 +109,22 @@ def draw_examples(decoded, fold_models, per_class, path):
         model = fold_models.get(clip.cv_fold)
         picture = clip_spectrogram(model, clip, fold_models.device)[0].cpu().numpy()
         n_bins = picture.shape[0]
-        ax.imshow(picture, origin='lower', aspect='auto', extent=[0, 4.0, 0, n_bins], cmap='magma', vmin=0, vmax=2)
+        ax.imshow(
+            picture,
+            origin='lower',
+            aspect='auto',
+            extent=[0, 4.0, 0, n_bins],
+            cmap='magma',
+            vmin=0,
+            vmax=2,
+        )
         for token, first_frame, last_frame in clip.spans:
             start, end = first_frame * 0.04, (last_frame + 1) * 0.04
             ax.axvspan(start, end, ymin=0.9, ymax=1.0, color=TOKEN_COLOURS[token])
             ax.text((start + end) / 2, n_bins * 0.95, token, ha='center', va='center', fontsize=7)
-        positions, tick_labels = frequency_ticks((model.frontend.bank.fmin, model.frontend.bank.fmax), n_bins)
+        positions, tick_labels = frequency_ticks(
+            (model.frontend.bank.fmin, model.frontend.bank.fmax), n_bins
+        )
         ax.set_yticks(positions, tick_labels)
         ax.tick_params(labelsize=6)
         ax.set_title(
@@ -146,7 +156,9 @@ def main():
     columns = ['name', 'label', 'predicted', 'confidence', 'tokens', 'sequence_class']
     decoded[columns].to_csv(f'{WS}/results/element_sequences_{run}.csv', index=False)
 
-    draw_examples(decoded, fold_models, arguments.examples, f'{WS}/figs/element_sequences_{run}.png')
+    draw_examples(
+        decoded, fold_models, arguments.examples, f'{WS}/figs/element_sequences_{run}.png'
+    )
     print(f'saved {WS}/figs/element_sequences_{run}.png')
 
 

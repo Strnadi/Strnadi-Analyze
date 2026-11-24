@@ -73,7 +73,9 @@ class ElementGrammar:
         self.token_index = {name: index for index, name in enumerate(self.tokens)}
         self.ending_class = {tuple(ending): name for name, ending in self.dialects.items()}
         self.prefixes = {
-            tuple(ending[:length]) for ending in self.dialects.values() for length in range(len(ending))
+            tuple(ending[:length])
+            for ending in self.dialects.values()
+            for length in range(len(ending))
         } - set(self.ending_class)
 
         self.class_sequences = {self.nothing_class: [[]]}
@@ -259,5 +261,7 @@ def class_log_likelihoods(token_log_probs, grammar=STRNADI_GRAMMAR):
                 reduction='none',
                 zero_infinity=True,
             )
-            scores[:, class_index] = torch.logaddexp(scores[:, class_index], -negative_log_likelihood)
+            scores[:, class_index] = torch.logaddexp(
+                scores[:, class_index], -negative_log_likelihood
+            )
     return scores.log_softmax(1)

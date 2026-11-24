@@ -160,7 +160,9 @@ def main():
     songs = unlabelled_songs(arguments.labelled)
     print(f'{len(songs)} unlabelled songs:', songs.source.value_counts().to_dict(), flush=True)
 
-    probabilities, sequence_class = teacher_readings(songs, arguments.runs, device, arguments.workers)
+    probabilities, sequence_class = teacher_readings(
+        songs, arguments.runs, device, arguments.workers
+    )
     candidates = songs.candidates.values
 
     for fold in range(N_FOLDS):

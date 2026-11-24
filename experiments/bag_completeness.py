@@ -8,7 +8,8 @@
 # model's actual weakness. The bag constraint supplies that signal: some song in the recording has
 # to be called complete.
 #
-# **Status:** proposed (from review proposal). Not run. The constraint was in the research
+# **Status:** rerun (from review proposal). Re-targeted on 2026-11-24 to the audited clips, the clean
+# noise bank and best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. Not run. The constraint was in the research
 # session's first plan ("at least one song in the recording is D") and was never implemented. Not
 # applied to site-level labels (Vizina / AudioMoth / JCU).
 #
@@ -30,7 +31,7 @@ RUN = 'bag_completeness'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_aligned.csv',
+    labelled_table='data/clips_audited.csv',
     extra_tables={
         'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
@@ -39,8 +40,6 @@ settings = TrainSettings(
     bag_table='data/weak_v5.csv',
     noise_bank='data/noise_bank_clean.npy',
     eval_window='center',
-    # protocol
-    checkpoint_rule='inner_smooth3',
     # optimisation
     epochs=25,
     samples_per_epoch=6144,

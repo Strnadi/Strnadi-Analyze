@@ -195,7 +195,8 @@ class ClipDataset(torch.utils.data.Dataset):
             row.npy, window_start, window_start + settings.window_seconds, settings.window_samples
         )
         if self.train and self.augment is not None:
-            waveform = self.augment(waveform)
+            contains_song = target[C2I['None']] < 0.5  # hard label or candidate set without None
+            waveform = self.augment(waveform, may_add_song=bool(contains_song))
         else:
             waveform = _peak_normalize(waveform)
         example['wave'] = torch.from_numpy(np.ascontiguousarray(waveform, np.float32))

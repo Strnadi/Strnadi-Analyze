@@ -5,7 +5,8 @@
 #
 # **Question.** Can attention over patches beat convolution here?
 #
-# **Status:** queued (from the research session). Not finished. Both reviews expect it to lose:
+# **Status:** rerun (from the research session). Re-targeted on 2026-11-24 to the audited clips, the clean
+# noise bank and best-validation-loss checkpoints, 5 folds; results in docs/RESULTS.md. Not finished. Both reviews expect it to lose:
 # 3,744 labelled clips are too few for a transformer from scratch. Low priority.
 #
 # Run from the repository root with `python -m experiments.patch_transformer`, or step
@@ -23,17 +24,14 @@ RUN = 'patch_transformer'
 
 settings = TrainSettings(
     # data
-    labelled_table='data/orig_aligned.csv',
+    labelled_table='data/clips_audited.csv',
     extra_tables={
         'data/weak_v5.csv': 0.35,
         'data/cf_v4.csv': 0.08,
         'data/vizann_v1.csv': 0.07,
     },
-    noise_bank='data/noise_bank_audiomoth.npy',
-    eval_window='start',
-    # protocol
-    folds=[0, 1, 2],
-    checkpoint_rule='inner_argmax',
+    noise_bank='data/noise_bank_clean.npy',
+    eval_window='center',
     # optimisation
     epochs=25,
     samples_per_epoch=6144,

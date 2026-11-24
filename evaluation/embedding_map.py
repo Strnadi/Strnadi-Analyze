@@ -128,7 +128,8 @@ def main():
         )
     left.legend(fontsize=8, markerscale=2)
     left.set_title(
-        f'held-out clips by label (kNN accuracy in 2-D {result["knn_accuracy_2d"]:.2f})', fontsize=10
+        f'held-out clips by label (kNN accuracy in 2-D {result["knn_accuracy_2d"]:.2f})',
+        fontsize=10,
     )
     right.scatter(points[:, 0], points[:, 1], s=9, c=clusters, cmap='tab20')
     right.set_title(
