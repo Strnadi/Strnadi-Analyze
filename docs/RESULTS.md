@@ -156,6 +156,48 @@ bird-species embedding does not carry within-species structure, but a small proj
 encoder (under 1 M parameters, minutes of GPU training on a few thousand labelled clips) does, and
 its map is drawable.
 
+## From windows to songs in a whole recording
+
+`python -m evaluation.whole_recording <model>`: the shipped model scanned over the complete
+recordings of the 15 held-out Vizina males (2.4 h, 663 annotated songs) with a 4 s window every
+0.2 s. Every song is seen by about 20 windows; the question is how to combine them.
+
+| Rule for one answer per song | Accuracy | BhBl recall | Unfinished recall |
+|---|---|---|---|
+| most confident non-None window (**the deployed logic**) | 0.869 | 0.573 | 0.996 |
+| plain mean of the windows' probabilities | 0.985 | 0.985 | 0.985 |
+| mean weighted by p(song) | **0.988** | 0.985 | 0.989 |
+| mean weighted by p(song) and by where the attention peaks | 0.986 | 0.985 | 0.987 |
+| a dialect if any window gives it >= 0.5 | 0.958 | 0.985 | 0.946 |
+| one window aligned on the annotated onset | 0.976 | 0.980 | 0.974 |
+
+- **"Most confident window" is what turns complete songs into "Unfinished".** A window that cuts
+  the ending is confidently, and correctly, "Unfinished", and it often out-votes the windows that
+  see the ending. With the same model, that rule alone loses 43 % of the complete BhBl songs:
+  the field complaint about the deployed service, reproduced.
+- **A weighted average is the right idea** (the owner's suggestion): it is better than a single
+  perfectly aligned window. The exact weighting hardly matters.
+- The scan misses almost nothing: 99.8 % of annotated songs have a window that says "song" (the
+  energy-based segmenter of the earlier pipeline found 87.5 %).
+
+**Without the annotation** (`detect_songs` in the same file; what a service would run): each
+window that hears a song votes for the moment its temporal attention peaks, i.e. where it believes
+the ending is; a peak of the vote curve is one song, labelled by the weighted mean of its voters.
+
+| | Attention voting, shipped model | Earlier pipeline (segmenter + aligned windows, research log) | Deployed service |
+|---|---|---|---|
+| annotated songs found | **0.995** | 0.875 | 0.774 |
+| complete BhBl songs found and labelled BhBl | **0.975** | 0.88 | 0.68 |
+| label accuracy of the songs found | 0.985 | - | - |
+| detections matching no annotated song, per minute | 1.6 | 1.65 | 1.2 |
+
+The unmatched detections include real songs of unannotated background birds; they were not viewed.
+This is one site and one dialect, and focal recordings: the same test on phone recordings is still
+missing. `serving/pipeline.py` still uses the segmenter with three aligned windows; moving it to the
+scan needs the attention as a third output of the exported graph (not done). For "cut and delete"
+processing of the passive-recorder archive, 0.5 % missed songs on focal recordings is the first
+number that makes it thinkable; it has to be repeated on recorder audio first.
+
 ## Element sequences: the model says which elements it heard
 
 `losses/element_ctc.py`, `experiments/element_sequence_ctc.py`, `evaluation/element_sequences.py`.
