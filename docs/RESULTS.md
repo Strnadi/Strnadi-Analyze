@@ -188,6 +188,21 @@ one window each get their own answer.
 - What it buys: a readable answer, and a free "not sure" flag. Where head and sequence disagree
   (6 % of clips) the head is right only 75 % of the time; where they agree, 96.6 %.
 
+**What the decoded tokens look like on spectrograms** (`figs/element_sequences_<run>.png`, 42
+held-out clips of the shipped recipe viewed). The tokens for B, C, E, L, H and X are single-frame
+spikes that land on, or just after, the element they name; X and B of XB songs and B and C / E of
+BC / BE songs are placed correctly in nearly every example. Two weaknesses are visible:
+
+- the `phrase` token is often emitted at the very start of the window, not on the phrase, so the
+  tokens cannot be used to time the phrase, and splitting a window into songs at `phrase` is less
+  reliable than the table design assumes;
+- several clear BhBl songs (two whistles plainly visible, class head correct) decode as
+  `phrase B`: the second whistle is under-reported. In the shipped recipe the sequence alone is
+  0.88 accurate against 0.957 for the head.
+
+So today the sequence is a readable second opinion and an uncertainty flag, not a replacement for
+the class head. `element_sequence_discriminative` (queued) targets exactly the under-reporting.
+
 **Limits of "generic".** The table fits species whose categories are an ordered sequence of a few
 discrete, nameable elements. It does not fit graded or continuous calls, large improvised
 repertoires, or classes defined by rhythm or absolute pitch; such projects would use the plain class
