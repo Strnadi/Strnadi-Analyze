@@ -247,9 +247,9 @@ def class_log_likelihoods(token_log_probs, grammar=STRNADI_GRAMMAR):
     """
     batch_size, n_frames, _ = token_log_probs.shape
     device = token_log_probs.device
-    scores = torch.full((batch_size, len(grammar.classes)), float('-inf'), device=device)
-
-    for class_index, class_name in enumerate(grammar.classes):
+    class_scores = []
+    for class_name in grammar.classes:
+        sequence_scores = []
         for sequence in grammar.class_sequences[class_name]:
             tokens = [grammar.token_index[token] for token in sequence]
             negative_log_likelihood = F.ctc_loss(
@@ -261,7 +261,7 @@ def class_log_likelihoods(token_log_probs, grammar=STRNADI_GRAMMAR):
                 reduction='none',
                 zero_infinity=True,
             )
-            scores[:, class_index] = torch.logaddexp(
-                scores[:, class_index], -negative_log_likelihood
-            )
+            sequence_scores.append(-negative_log_likelihood)
+        class_scores.append(torch.stack(sequence_scores).logsumexp(0))
+    scores = torch.stack(class_scores, dim=1)  # (B, n_classes)
     return scores.log_softmax(1)

@@ -43,7 +43,7 @@ from layers.freq_mixstyle import FreqMixStyle
 from layers.spec_augment import SpecAugment
 from losses.bag_complete import bag_complete_nll
 from losses.distill_cosine import distill_cosine
-from losses.element_ctc import element_ctc_loss
+from losses.element_ctc import class_log_likelihoods, element_ctc_loss
 from losses.factorized_weak import factorized_weak_loss
 from losses.fixmatch import FreeMatch
 from losses.frame_bce import frame_bce
@@ -664,6 +664,16 @@ class FoldTraining:
                 outputs['token_log_probs'], hard_targets, batch['w'].float()
             )
             loss = loss + settings.sequence_loss_weight * sequence_loss
+
+        if settings.sequence_class_loss_weight > 0 and 'token_log_probs' in outputs:
+            # Discriminative version: the classes compete. Plain CTC only raises the likelihood of
+            # the labelled sequence; here "phrase B C" must also beat "phrase B".
+            is_hard = batch['kind'] == HARD_LABEL
+            if is_hard.any():
+                class_scores = class_log_likelihoods(outputs['token_log_probs'][is_hard])
+                true_class = batch['target'][is_hard].argmax(1)
+                sequence_class_loss = nn.functional.nll_loss(class_scores, true_class)
+                loss = loss + settings.sequence_class_loss_weight * sequence_class_loss
 
         # --- distillation
         if self.distill_projection is not None:
