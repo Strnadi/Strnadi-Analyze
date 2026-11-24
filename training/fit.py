@@ -666,6 +666,12 @@ class FoldTraining:
             )
             loss = loss + settings.sequence_loss_weight * sequence_loss
 
+        if settings.sequence_anchor_weight > 0 and 'token_log_probs' in outputs:
+            # probability mass each frame puts on the tokens allowed there (1 where unconstrained)
+            allowed_mass = (outputs['token_log_probs'].exp() * batch['token_mask']).sum(-1)
+            anchor_loss = -torch.log(allowed_mass.clamp_min(1e-6)).mean()
+            loss = loss + settings.sequence_anchor_weight * anchor_loss
+
         if settings.sequence_class_loss_weight > 0 and 'token_log_probs' in outputs:
             # Discriminative version: the classes compete. Plain CTC only raises the likelihood of
             # the labelled sequence; here "phrase B C" must also beat "phrase B".

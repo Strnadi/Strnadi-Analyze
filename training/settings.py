@@ -137,6 +137,9 @@ class TrainSettings:
     measurement_loss_weight: float = 0.0
     #: Weight of the CTC loss on element sequences (models built with `element_tokens`).
     sequence_loss_weight: float = 0.0
+    #: Weight of the anchoring loss: where a row carries expert element timing, tokens are only
+    #: allowed inside their element's span (`training.data.token_frame_mask`).
+    sequence_anchor_weight: float = 0.0
     #: Weight of the discriminative sequence loss: cross-entropy over the classes, each scored by
     #: the CTC likelihood of its element sequences (`losses.element_ctc.class_log_likelihoods`).
     sequence_class_loss_weight: float = 0.0

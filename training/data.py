@@ -34,6 +34,47 @@ MEASUREMENTS = ['f1', 'f2', 'f3', 'df', 'bw', 't2', 'has_first', 'has_second']
 
 HARD_LABEL, CANDIDATE_SET, SOFT_LABEL = 0, 1, 2
 
+#: The element-token head has one frame per 40 ms (losses/element_ctc.py).
+TOKEN_FRAME_SECONDS = 0.04
+#: CTC tokens tend to fire as an element ends: a token may come this long after its span.
+TOKEN_LATE_SECONDS = 0.15
+
+
+def token_frame_mask(row, window_start, window_seconds):
+    """Which element tokens are allowed in which frame: array (frames, n_tokens) of 0 / 1.
+
+    Rows with expert element timing (the columns written by processing/build_element_spans.py)
+    constrain the frames around their song: `phrase` only inside the phrase, the terminal tokens
+    only inside the terminal span (`B`, and the lower whistle `L` when there are two elements),
+    and nothing but blank just before and after the song. So a phrase-only song can only be
+    decoded as `phrase`, and a single-B song has no room for a second element. Frames away from
+    the song, and all frames of rows without timing, are unconstrained.
+    """
+    from losses.element_ctc import STRNADI_GRAMMAR as grammar
+
+    n_frames = int(round(window_seconds / TOKEN_FRAME_SECONDS))
+    mask = np.ones((n_frames, len(grammar.tokens)), np.float32)
+    if 'n_terminal' not in row or pd.isna(row.get('n_terminal')):
+        return mask
+
+    blank, phrase = 0, grammar.token_index['phrase']
+    frame_time = window_start + (np.arange(n_frames) + 0.5) * TOKEN_FRAME_SECONDS
+
+    around_song = (frame_time >= row.phrase_t0 - 0.3) & (frame_time <= row.terminal_t1 + 0.5)
+    mask[around_song] = 0
+    mask[around_song, blank] = 1
+
+    in_phrase = (frame_time >= row.phrase_t0) & (frame_time <= row.phrase_t1 + TOKEN_LATE_SECONDS)
+    mask[in_phrase, phrase] = 1
+
+    allowed_terminals = ['B', 'L'][: int(row.n_terminal)]
+    in_terminal = (frame_time >= row.terminal_t0) & (
+        frame_time <= row.terminal_t1 + TOKEN_LATE_SECONDS
+    )
+    for name in allowed_terminals:
+        mask[in_terminal, grammar.token_index[name]] = 1
+    return mask
+
 
 def read_table(path, **read_csv_arguments):
     """Read a table from the workspace, keeping the literal label 'None' as a string."""
@@ -211,6 +252,9 @@ class ClipDataset(torch.utils.data.Dataset):
         example['wave'] = torch.from_numpy(np.ascontiguousarray(waveform, np.float32))
 
         example['frames'] = torch.from_numpy(self._song_activity(row, window_start))
+        if settings.sequence_anchor_weight > 0:
+            mask = token_frame_mask(row, window_start, settings.window_seconds)
+            example['token_mask'] = torch.from_numpy(mask)
         if settings.element_loss_weight > 0:
             example['elements'] = torch.from_numpy(self._element_tags(row, window_start))
         if settings.measurement_loss_weight > 0:
