@@ -193,10 +193,33 @@ the ending is; a peak of the vote curve is one song, labelled by the weighted me
 
 The unmatched detections include real songs of unannotated background birds; they were not viewed.
 This is one site and one dialect, and focal recordings: the same test on phone recordings is still
-missing. `serving/pipeline.py` still uses the segmenter with three aligned windows; moving it to the
-scan needs the attention as a third output of the exported graph (not done). For "cut and delete"
-processing of the passive-recorder archive, 0.5 % missed songs on focal recordings is the first
-number that makes it thinkable; it has to be repeated on recorder audio first.
+missing.
+
+**The service now works this way.** `serving/export_onnx.py` exports the temporal attention as a
+third output, and `serving/pipeline.py` scans the upload (a window every 0.4 s, which finds the same
+songs as 0.2 s) and builds the `/classify` response from the detected songs; graphs without the
+attention output fall back to the segmenter. `tests/check_service_on_recordings.py` runs that exact
+code path through ONNX Runtime on 25 held-out recordings (138 min, 627 annotated songs): 99.4 % of
+the songs get a segment, 98.1 % of those carry the right label, 1.7 segments per minute match no
+annotated song. Not done: the Docker image and the HTTP layer were not run here, and the reported
+interval of a song is a fixed span around its detected ending (3.0 s before, 0.4 s after), not a
+measured onset. For "cut and delete" processing of the passive-recorder archive, 0.5 % missed
+songs on focal recordings is the first number that makes it thinkable; it has to be repeated on
+recorder audio first.
+
+### Harvesting the songs the old detection missed
+
+On the held-out recordings the old chain (segmenter, BirdNET score >= 0.3, window placement) holds
+81 % of the annotated songs; the scan finds 99.5 %. `processing/harvest_songs_by_scan.py` scans
+every continuous recording of the training split: the citizen archive (155 h), the focal recordings
+(98 h, held-out males excluded) and the passive-recorder sample (87 h). In a trial on 120
+recordings 40 % of the detected songs were new. Of 40 new detections viewed, about 30 are real
+Yellowhammer songs, most of them faint or distant; about 10 are other sounds, which the
+machine-labelling checks have to reject. Not scanned: the BirdNET detections (already cut to one
+song each) and the JCU recorder batch (only cut windows were kept, the hourly files were deleted).
+The JCU windows were machine-labelled as they are: 28,025 of 41,746 passed (20,492 Unfinished,
+5,461 BhBl, 2,072 None), a new table `data/songs_jcu_machine_labelled.csv`.
+Experiments: `expanded_scan_harvest`, `expanded_all_sources` (see the runs table).
 
 ## Element sequences: the model says which elements it heard
 

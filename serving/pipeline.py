@@ -1,31 +1,37 @@
 """Song-level inference on a whole recording, with no torch dependency (numpy + scipy + onnxruntime).
 
-    detect songs -> align a window on each song -> classify -> one label per song
+    find the songs -> one label per song -> the `/classify` response
 
-1. Song events from the tonal-SNR segmenter (`processing/segment.py`); pieces of one song are merged.
-2. Each song is classified from 3 windows starting 0.6 / 0.4 / 0.2 s before its onset (probabilities averaged),
-   so the whole song is inside every window. For long songs the windows start later, so that at least 1.1 s
-   follows the detected end: the detector often stops at the B element, before the quiet terminal C / E.
-   Digital silence in the upload is filled with background noise, as in training.
-3. Songs classified "None" are dropped. A dialect below `min_confidence` is reported as "Unknown".
+With a model exported since 2026-11-24 (its graph also returns the temporal attention):
 
-Why not the old sliding-window logic (`runner.py`, 4 s windows every 0.5 s, keep the most confident of
-overlapping windows): most of those windows cut a song somewhere, which is where "complete songs reported as
-Unfinished" came from; and its max-over-windows merging and the bout aggregation of `runner_v2` were never
-evaluated. On full recordings of held-out Vizina males this pipeline finds 0.875 of songs and labels 0.88 of the
-complete BhBl songs correctly (production logic: 0.774 and 0.68).
+1. The recording is scanned with a 4 s window every 0.4 s.
+2. Songs are the peaks of the "attention vote" curve (serving/scan.py); each song's class
+   probabilities are the weighted mean of the windows that voted for it.
+3. A dialect below `min_confidence` is reported as "Unknown".
 
-The model is an ONNX graph exported by `serving/export_onnx.py`: waveform (B, 128000) @ 32 kHz -> probs (B, 7);
-peak normalisation is inside the graph.
+On whole recordings of held-out males this finds 99.5 % of the annotated songs and recognises
+97.5 % of the complete BhBl songs. The logic it replaces (4 s windows every 0.5 s, keep the most
+confident of overlapping windows) recognises 57 % with the same model, because a window that cuts
+a song's ending is confidently "Unfinished" (docs/RESULTS.md, "From windows to songs").
+
+With an older graph (no attention output) the previous method is used: song events from the
+tonal-SNR segmenter (`processing/segment.py`), each classified from 3 windows starting
+0.6 / 0.4 / 0.2 s before its onset. It finds 87.5 % of the songs.
+
+Digital silence in the upload is filled with background noise, as in training. The model is an ONNX
+graph exported by `serving/export_onnx.py`; peak normalisation is inside the graph.
 """
 
 import numpy as np
 from processing.audio_repair import background_noise, fill_zero_runs
 from processing.segment import segment_songs
+from serving.scan import detect_songs
 
 SR, WIN = 32000, 128000
 OFFSETS = (-0.6, -0.4, -0.2)
 TAIL_AFTER_END = 1.1  # seconds a window should keep after the detected song end
+SCAN_HOP = 0.4  # seconds between windows of the scan (0.2 and 0.4 find the same songs)
+SONG_BEFORE_ENDING, SONG_AFTER_ENDING = 3.0, 0.4  # the reported interval around a detected ending
 
 
 class SongClassifier:
@@ -38,6 +44,8 @@ class SongClassifier:
         self.labels = list(labels)
         self.min_conf, self.min_rep = min_confidence, min_representant
         self.dialects = [l for l in self.labels if l not in ('None', 'Unfinished')]
+        # graphs exported since 2026-11-24 also return the temporal attention: scan with them
+        self.has_attention = 'att' in [output.name for output in self.sess.get_outputs()]
 
     def _windows(self, y, starts):
         if (
@@ -78,17 +86,65 @@ class SongClassifier:
         return max(onset + offset, latest_useful)
 
     def classify(self, y):
-        """y: mono float32 waveform at 32 kHz. Returns the `/classify` response dict."""
+        """y: mono float32 waveform at 32 kHz. Returns the `/classify` response dict.
+
+        With a model that returns its attention, songs are found by scanning the recording
+        (serving/scan.py); older graphs fall back to the energy segmenter with three aligned
+        windows per song.
+        """
         # Digital silence (decoder delay, zero padding) is filled like in training: a black block
         # after a song reads as "no ending".
         y = fill_zero_runs(np.asarray(y, np.float32))
+        if self.has_attention:
+            songs = self.scan(y)
+        else:
+            songs = self.segment_and_classify(y)
+        return self.response(songs)
+
+    def scan(self, y):
+        """Songs found by attention voting: list of ((start, end), class probabilities)."""
+        duration = max(len(y), WIN) / SR
+        starts = np.arange(0, duration - WIN / SR + 1e-6, SCAN_HOP)
+        windows = self._windows(y, starts)
+        probabilities, attention = [], []
+        for first in range(0, len(windows), 16):
+            batch = self.sess.run(['probs', 'att'], {'waveform': windows[first : first + 16]})
+            probabilities.append(batch[0])
+            attention.append(batch[1])
+        probabilities, attention = np.concatenate(probabilities), np.concatenate(attention)
+        attention_peak = attention.argmax(1) * (WIN / SR / attention.shape[1])
+
+        none_index = self.labels.index('None')
+        songs = []
+        for ending, best, mean_probabilities in detect_songs(
+            starts, probabilities, attention_peak, SCAN_HOP, none_index
+        ):
+            # a detection asserts a song: report its most likely class other than "None"
+            song_probabilities = mean_probabilities.copy()
+            song_probabilities[none_index] = 0
+            song_probabilities /= song_probabilities.sum()
+            interval = (
+                max(0.0, ending - SONG_BEFORE_ENDING),
+                min(len(y) / SR, ending + SONG_AFTER_ENDING),
+            )
+            songs.append((interval, song_probabilities))
+        return songs
+
+    def segment_and_classify(self, y):
+        """Songs from the energy segmenter, each classified from three aligned windows."""
         events = self.songs(y)
         if not events:
-            return {'representantId': -1, 'segments': []}
+            return []
         starts = [self.window_start(s0, s1, o) for s0, s1 in events for o in OFFSETS]
         P = self._predict(self._windows(y, starts)).reshape(len(events), len(OFFSETS), -1).mean(1)
+        return list(zip(events, P))
+
+    def response(self, songs):
+        """The `/classify` response for a list of ((start, end), class probabilities)."""
+        if not songs:
+            return {'representantId': -1, 'segments': []}
         segments = []
-        for (s0, s1), p in zip(events, P):
+        for (s0, s1), p in songs:
             best = int(p.argmax())
             label = self.labels[best]
             if label == 'None':

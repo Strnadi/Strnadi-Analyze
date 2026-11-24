@@ -6,7 +6,7 @@
 The weak and machine-labelled tables hold the songs found by the old chain: energy segmenter ->
 BirdNET Yellowhammer score >= 0.3 -> window placement. On recordings where every song is annotated
 that chain captures 81 % of the songs; the model's own scan with attention voting
-(`evaluation/whole_recording.py::detect_songs`) finds 99.5 %. This script runs the scan over the
+(`serving/scan.py::detect_songs`) finds 99.5 %. This script runs the scan over the
 citizen archive, the focal recordings and the passive-recorder sample and writes one row per
 detected song. **Nothing existing is modified**: the result is a new table.
 
@@ -28,8 +28,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-from config import workspace_path
-from evaluation.whole_recording import detect_songs, scan_recording
+from config import NONE_IDX, workspace_path
+from evaluation.whole_recording import scan_recording
+from serving.scan import detect_songs
 from training.inference import TorchEnsemble
 
 WINDOW_SECONDS = 4.4
@@ -83,8 +84,8 @@ def main():
         )
         if len(starts) == 0:
             continue
-        detections = detect_songs(starts, probabilities, attention_peak, arguments.hop)
-        endings = np.array([time for time, _ in detections])
+        detections = detect_songs(starts, probabilities, attention_peak, arguments.hop, NONE_IDX)
+        endings = np.array([time for time, _, _ in detections])
         old_segments = found_by_old_chain(
             events_by_file.get(recording.npy, events.iloc[:0]), recording.npy
         )

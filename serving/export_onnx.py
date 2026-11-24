@@ -1,7 +1,8 @@
 """Export a trained model (one checkpoint, or the fold ensemble of a run averaged into one graph) to ONNX and
 check the exported graph against PyTorch. Replaces the legacy `convert.py` (Keras -> TFLite).
 
-Deploy graph: waveform (B, 128000) @ 32 kHz -> probs (B, 7), emb (B, D)
+Deploy graph: waveform (B, 128000) @ 32 kHz -> probs (B, 7), emb (B, D), att (B, frames)
+(`att` is the temporal attention; the service finds songs from it, serving/scan.py)
 - peak normalisation is inside the graph (the service sends raw decoded audio);
 - every STFT runs as conv1d, so only standard ops are used.
 Parity is checked twice: the export graph against the training-path model (FFT STFT), and ONNX Runtime against
@@ -28,12 +29,14 @@ class Deploy(nn.Module):
 
     def forward(self, wave):
         wave = wave / wave.abs().amax(dim=1, keepdim=True).clamp_min(1e-6) * 0.5
-        probs, emb = 0, 0
+        probs, emb, att = 0, 0, 0
         for m in self.models:
             out = m(wave)
             probs = probs + torch.softmax(out['logits'], 1)
             emb = emb + out['emb']
-        return probs / len(self.models), emb / len(self.models)
+            att = att + out['att']  # temporal attention: where in the window the model looks
+        n = len(self.models)
+        return probs / n, emb / n, att / n
 
 
 def main():
@@ -52,8 +55,8 @@ def main():
         (x,),
         out_path,
         input_names=['waveform'],
-        output_names=['probs', 'emb'],
-        dynamic_axes={'waveform': {0: 'batch'}, 'probs': {0: 'batch'}, 'emb': {0: 'batch'}},
+        output_names=['probs', 'emb', 'att'],
+        dynamic_axes={name: {0: 'batch'} for name in ('waveform', 'probs', 'emb', 'att')},
         opset_version=17,
         dynamo=False,
     )

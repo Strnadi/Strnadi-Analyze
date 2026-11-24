@@ -26,7 +26,7 @@ Rules compared (the annotation is used only to decide which windows belong to wh
 It also reports how many annotated songs the scan finds at all (some overlapping window says
 "song"), and how much of the audio far from every annotated song is called "song".
 
-**Without the annotation** (`detect_songs`, what a service would run): every window that hears a
+**Without the annotation** (`serving/scan.py::detect_songs`, what the service runs): every window that hears a
 song votes for the moment its temporal attention peaks, i.e. where it believes the ending is.
 Windows that see the same song vote for the same moment, so songs appear as peaks of the vote
 curve; each peak becomes one song, labelled by the weighted mean of the windows that voted for it.
@@ -43,6 +43,7 @@ import torch
 
 from config import CLASSES, DIALECT_IDX, NONE_IDX, SR, UNFINISHED_IDX, WS
 from training.data import read_table
+from serving.scan import centred_weight, detect_songs
 from training.inference import TorchEnsemble
 
 WINDOW_SECONDS = 4.0
@@ -80,13 +81,6 @@ def scan_recording(models, npy, hop_seconds, device):
 
 
 # --------------------------------------------------------------------------------------- rules
-def centred_weight(attention_peak):
-    """1 when the attention peak is 1.2-3.2 s into the window, falling to 0 at 0.2 s and 3.9 s."""
-    rising = np.clip((attention_peak - 0.2) / 1.0, 0, 1)
-    falling = np.clip((3.9 - attention_peak) / 0.7, 0, 1)
-    return np.minimum(rising, falling)
-
-
 def song_answers(probabilities, attention_peak):
     """The answer of every rule for one song, given the windows that overlap it."""
     answers = {}
@@ -119,54 +113,6 @@ def song_answers(probabilities, attention_peak):
     else:
         answers['any complete window'] = NONE_IDX
     return answers
-
-
-# ------------------------------------------------------------------------- blind detection
-def detect_songs(starts, probabilities, attention_peak, hop_seconds, min_votes=None):
-    """Find songs in a scanned recording from the windows alone.
-
-    Returns:
-        list of (ending time in seconds, class index) for every detected song.
-    """
-    if min_votes is None:
-        min_votes = (
-            0.6 / hop_seconds
-        )  # three full-weight windows at a 0.2 s hop, fewer when sparser
-    p_song = 1 - probabilities[:, NONE_IDX]
-    weights = p_song * centred_weight(attention_peak) * (p_song > 0.5)
-    vote_time = starts + attention_peak
-    n_bins = int(np.ceil((starts[-1] + WINDOW_SECONDS) / hop_seconds)) + 1
-    bins = np.round(vote_time / hop_seconds).astype(int)
-
-    votes = np.bincount(bins, weights=weights, minlength=n_bins)
-    class_votes = np.zeros((n_bins, probabilities.shape[1]))
-    np.add.at(class_votes, bins, probabilities * weights[:, None])
-
-    half_width = max(
-        1, int(round(0.4 / hop_seconds))
-    )  # ~0.8 s: one song's votes fall into one bump
-    kernel = np.ones(2 * half_width + 1)
-    kernel[[0, -1]] = 0.5
-    smoothed = np.convolve(votes, kernel, mode='same')
-    smoothed_classes = np.stack(
-        [
-            np.convolve(class_votes[:, index], kernel, mode='same')
-            for index in range(class_votes.shape[1])
-        ],
-        1,
-    )
-
-    detections = []
-    reach = int(round(1.0 / hop_seconds))  # a peak must be the highest point within +-1 s
-    for index in np.flatnonzero(smoothed >= min_votes):
-        neighbourhood = smoothed[max(0, index - reach) : index + reach + 1]
-        if smoothed[index] >= neighbourhood.max() and (
-            not detections or index * hop_seconds - detections[-1][0] > 1.0
-        ):
-            dialect_or_unfinished = smoothed_classes[index].copy()
-            dialect_or_unfinished[NONE_IDX] = 0
-            detections.append((index * hop_seconds, int(dialect_or_unfinished.argmax())))
-    return detections
 
 
 # ---------------------------------------------------------------------------------------- main
@@ -208,14 +154,14 @@ def main():
             found += bool(is_song[overlapping].any())
 
         # --- the same recording without the annotation
-        detections = detect_songs(starts, probabilities, attention_peak, arguments.hop)
+        detections = detect_songs(starts, probabilities, attention_peak, arguments.hop, NONE_IDX)
         used = np.zeros(len(detections), bool)
         for song in recording_songs.itertuples():
             is_bhbl = song.label == 'BhBl'
             blind['n_bhbl'] += is_bhbl
             hits = [
                 index
-                for index, (time, _) in enumerate(detections)
+                for index, (time, _, _) in enumerate(detections)
                 if song.t0 + 0.3 <= time <= song.t1 + 0.6 and not used[index]
             ]
             if hits:
