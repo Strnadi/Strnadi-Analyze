@@ -7,8 +7,8 @@ This is the current state of the Strnadi classifier. It supersedes the numbers i
 
 The old ceiling (accuracy ~0.87, macro-F1 ~0.77 for every recipe and architecture) was set by the
 labels, not by the models. After a visual audit of every clip the models disputed
-(`LABEL_AUDIT.md`: 220 relabelled, 140 removed as unjudgeable, of 3,744), a **0.9 M-parameter**
-network trained from scratch reaches **TABLE_REFERENCE_ACCURACY accuracy / TABLE_REFERENCE_F1
+(`LABEL_AUDIT.md`: 224 relabelled, 140 removed as unjudgeable, of 3,744), a **0.9 M-parameter**
+network trained from scratch reaches **0.96 accuracy / 0.92
 macro-F1** on recordings it never saw, and a **0.19 M-parameter** one is within a point of it. The
 deployed DenseNet121 (30.5 MB) scores 0.911 on the same clips although it was trained on most of
 them. No distillation, no teacher: every model here is trained directly on the source data.
@@ -33,15 +33,76 @@ them. No distillation, no teacher: every model here is trained directly on the s
 Produced by `python -m tools.results_table --markdown`. "fold sd" is the standard deviation of
 accuracy across the five folds.
 
-TABLE_ALL_RUNS
+<!-- runs table: begin -->
+| run | folds | params (M) | accuracy | fold sd | macro-F1 | BC | BE | BhBl | BlBh | None | Unfinished | XB |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| size_strnadnet_2900k | 5 | 2.91 | 0.962 | 0.007 | 0.918 | 0.95 | 0.97 | 0.94 | 0.87 | 0.80 | 0.97 | 0.98 |
+| strnadnet_audited_labels | 5 | 0.90 | 0.961 | 0.005 | 0.914 | 0.96 | 0.97 | 0.91 | 0.81 | 0.79 | 0.97 | 0.97 |
+| size_strnadnet_430k | 5 | 0.43 | 0.961 | 0.008 | 0.916 | 0.95 | 0.98 | 0.90 | 0.84 | 0.80 | 0.97 | 0.98 |
+| strnadnet_audited_labels_s1 | 5 | 0.90 | 0.961 | 0.007 | 0.921 | 0.96 | 0.98 | 0.93 | 0.89 | 0.79 | 0.96 | 0.97 |
+| augment_real_world | 5 | 0.90 | 0.959 | 0.008 | 0.916 | 0.95 | 0.98 | 0.90 | 0.86 | 0.82 | 0.96 | 0.98 |
+| ablation_clip_labels_only | 5 | 0.90 | 0.958 | 0.005 | 0.905 | 0.96 | 0.98 | 0.88 | 0.76 | 0.73 | 0.97 | 0.98 |
+| strnadnet_field_ready | 5 | 0.91 | 0.957 | 0.010 | 0.914 | 0.95 | 0.97 | 0.90 | 0.83 | 0.86 | 0.96 | 0.98 |
+| ablation_flat_head | 5 | 0.90 | 0.956 | 0.010 | 0.897 | 0.94 | 0.96 | 0.89 | 0.76 | 0.79 | 0.97 | 0.97 |
+| size_strnadnet_190k | 5 | 0.19 | 0.955 | 0.007 | 0.907 | 0.95 | 0.96 | 0.91 | 0.84 | 0.83 | 0.96 | 0.97 |
+| expanded_machine_labels | 5 | 0.90 | 0.955 | 0.004 | 0.910 | 0.95 | 0.98 | 0.90 | 0.86 | 0.82 | 0.96 | 0.98 |
+| backbone_mobilenetv3_large_imagenet | 5 | 4.97 | 0.954 | 0.007 | 0.901 | 0.97 | 0.98 | 0.85 | 0.78 | 0.79 | 0.96 | 0.96 |
+| element_sequence_ctc_weak_rows_in_sequence_loss | 5 | 0.91 | 0.954 | 0.008 | 0.903 | 0.94 | 0.97 | 0.89 | 0.84 | 0.80 | 0.96 | 0.97 |
+| element_sequence_ctc | 5 | 0.91 | 0.953 | 0.008 | 0.902 | 0.94 | 0.97 | 0.93 | 0.86 | 0.79 | 0.96 | 0.96 |
+<!-- runs table: end -->
+
+Scored against the labels after audit round 3; numbers quoted in the text below were partly
+measured before its four relabels and can differ from the table by 0.002.
+
+The queue was still running when this was written (front-ends, the other architectures, the
+second labelling round); `python -m tools.results_table --write-doc` refreshes the table.
 
 ## What each comparison says
 
-TABLE_FINDINGS
+Two seeds of the reference give 0.963 and 0.961 accuracy (macro-F1 0.915 and 0.921): differences
+below about half a point of accuracy, or one point of macro-F1, are noise.
+
+- **Labels were the ceiling.** The same recipe went from 0.874 / 0.774 (original labels) to
+  0.96 / 0.92 (audited labels and labelled-clip windows).
+- **Size barely matters.** 0.19 M parameters: 0.956; 0.43 M: 0.961; 0.90 M: 0.962; 2.9 M: 0.962.
+  The race to the bottom is open well below one million parameters.
+- **ImageNet pretraining does not help.** MobileNetV3-large (5.0 M with its head, pretrained): 0.955, below the
+  0.19 M network trained from scratch.
+- **The factorised head matters** (song x complete x dialect): the plain 7-class head loses 0.7
+  points of accuracy and 2 of macro-F1.
+- **The weak file-level labels now add little**: clip labels alone reach 0.958 / 0.905. They mostly
+  help the rare classes (BhBl 0.88 -> 0.91, BlBh 0.76 -> 0.81).
+- **Machine-labelled songs, field augmentation and the element-sequence output** each cost
+  between nothing and 0.8 points on this test set, and together half a point; see their sections
+  for why they are in the shipped recipe anyway.
 
 ## The model that ships
 
-TABLE_FINAL_MODEL
+`experiments/strnadnet_field_ready.py` (the recipe) and `experiments/train_shipped_model.py`
+(training on all folds, export).
+
+| | |
+|---|---|
+| Network | StrnadNet, 0.90 M parameters, trained from scratch: 128-bin log-mel 1.5-11 kHz -> 4 residual stages -> dilated temporal convolutions -> attentive pooling -> factorised head, plus the element-token head |
+| Input / output | 4 s of 32 kHz mono audio -> 7 class probabilities, a 128-d embedding, the element sequence |
+| Trained on | audited clips (40 % of draws), machine-labelled songs (25 %), weak file-level songs (20 %), synthetic ending swaps / truncations (8 %), expert-annotated focal songs (7 %) |
+| Augmentation | speed +-2 %, clean background noise, far-field simulation, other species in the background, device EQ, null splices, SpecAugment |
+| Cross-validated | **accuracy 0.957, macro-F1 0.914** (reference recipe without the field additions: 0.962 / 0.918) |
+| Independent expert songs (Vizina, 663) | shipped single model 0.979 (BhBl recall 0.985); the five fold models together 0.991 |
+| Checkpoint | epoch 18 of 25, the lowest inner-validation loss (0.203; last epoch 0.207: no overfitting) |
+| Files | `runs/strnadnet_field_ready/final/model.pt`; `export/strnadi_classifier.onnx`, 6.3 MB, ONNX Runtime = PyTorch to 1e-7 |
+| Explanation | deletion test: hiding the 3 most important patches turns 33.5 % of complete songs into "Unfinished" (random patches 0.25 %); head and element sequence agree on 89 % of clips, which are 97.1 % correct |
+
+Why this one and not the highest number: the reference is half a point better on archive
+recordings, but it has never heard a simulated far-field song, another species over the song, a
+phone-detected song from another country, and it cannot say which elements it heard. The app's
+recordings are phone and field recordings. If a pure-accuracy model is preferred, train it with
+`STRNADI_RECIPE=strnadnet_audited_labels python -m experiments.train_shipped_model`.
+
+**Size.** Of the 6.3 MB ONNX file about 2.5 MB is the spectrogram front-end written as
+convolutions (so that the graph uses only standard operators), not the network. The phone-size
+candidate is `strnadnet_field_ready_190k` (0.19 M parameters; see the table). A TFLite build of
+the new models has not been made in this session (`serving/export_tflite.py`, needs TensorFlow).
 
 ## Is it valid? Checks that do not depend on the audit
 
@@ -117,7 +178,7 @@ one window each get their own answer.
 |---|---|---|---|---|---|
 | sequence loss on all rows, weak candidate sets included | 0.955 | 0.864 | 0.892 | 0.907 | 0.968 |
 | `element_sequence_ctc`: sequence loss on hand-labelled clips only | 0.953 | 0.921 | 0.930 | 0.941 | 0.966 |
-| `element_sequence_discriminative`: classes compete | TABLE_DISCRIMINATIVE |
+| `element_sequence_discriminative`: classes compete | queued; see the runs table and `python -m evaluation.element_sequences element_sequence_discriminative` | | | | |
 
 - The first version read most BC / BE songs as `phrase B`: a candidate set such as
   `BC|Unfinished|None` lets CTC always take the easy reading. Using only hard labels fixed it
@@ -157,7 +218,7 @@ its duration would be measured on the spectrogram.
 |---|---|---|
 | reference (two seeds) | 0.963, 0.961 | 0.915, 0.921 |
 | `expanded_machine_labels` (round 1) | 0.956 | 0.910 |
-| `expanded_machine_labels_round2` | TABLE_ROUND2 |
+| `expanded_machine_labels_round2` | queued; see the runs table | |
 
 On this test set the extra labels do not help: the labelled clips already cover the archive, and a
 model cannot learn much from songs it was already confident about. Their value is elsewhere and is
@@ -176,7 +237,7 @@ the model's own p(song) on a dense grid of windows is the natural detector to te
 |---|---|---|---|
 | reference | speed +-2 %, noise 0-20 dB, null splices, SpecAugment | 0.963, 0.961 | 0.915, 0.921 |
 | `augment_real_world` | far-field simulation, other species in the background, device EQ | 0.960 | 0.916 |
-| `augment_background_songs` | a second, quieter Yellowhammer (label-safe form of two-song mixup) | TABLE_BACKGROUND |
+| `augment_background_songs` | a second, quieter Yellowhammer (label-safe form of two-song mixup) | queued; see the runs table | |
 
 The field augmentations cost nothing on the archive test set, which contains little far-field or
 phone audio and so cannot show their benefit; they are in the shipped recipe. Two songs are only

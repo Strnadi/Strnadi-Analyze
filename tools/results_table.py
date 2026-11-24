@@ -3,7 +3,8 @@
     python -m tools.results_table [labelled table, default data/clips_audited.csv]
 
 Only runs evaluated on the given labelled table are listed, so every line is comparable.
-Add `--markdown` for a table that can be pasted into docs/RESULTS.md.
+`--markdown` prints a Markdown table; `--write-doc` puts that table into docs/RESULTS.md, between
+the two `runs table` marker lines, so the document can be refreshed after more runs finish.
 """
 
 import glob
@@ -65,7 +66,9 @@ def describe_run(run_dir, labelled_table):
 def main():
     arguments = [argument for argument in sys.argv[1:] if not argument.startswith('--')]
     labelled_table = arguments[0] if arguments else 'data/clips_audited.csv'
-    markdown = '--markdown' in sys.argv
+    write_doc = '--write-doc' in sys.argv
+    markdown = '--markdown' in sys.argv or write_doc
+    lines = []
 
     rows = [describe_run(run_dir, labelled_table) for run_dir in sorted(glob.glob(f'{WS}/runs/*'))]
     rows = sorted([row for row in rows if row], key=lambda row: -row['accuracy'])
@@ -73,10 +76,10 @@ def main():
     header = ['run', 'folds', 'params (M)', 'accuracy', 'fold sd', 'macro-F1'] + CLASSES
     separator = ' | ' if markdown else '  '
     if markdown:
-        print('| ' + ' | '.join(header) + ' |')
-        print('|' + '---|' * len(header))
+        lines.append('| ' + ' | '.join(header) + ' |')
+        lines.append('|' + '---|' * len(header))
     else:
-        print(f'{header[0]:38s}' + separator.join(f'{name:>10s}' for name in header[1:]))
+        lines.append(f'{header[0]:38s}' + separator.join(f'{name:>10s}' for name in header[1:]))
     for row in rows:
         cells = [
             f'{row["folds"]}',
@@ -86,9 +89,24 @@ def main():
             f'{row["macro_f1"]:.3f}',
         ] + [f'{row["recall"][name]:.2f}' for name in CLASSES]
         if markdown:
-            print(f'| {row["run"]} | ' + ' | '.join(cells) + ' |')
+            lines.append(f'| {row["run"]} | ' + ' | '.join(cells) + ' |')
         else:
-            print(f'{row["run"]:38s}' + separator.join(f'{cell:>10s}' for cell in cells))
+            lines.append(f'{row["run"]:38s}' + separator.join(f'{cell:>10s}' for cell in cells))
+
+    if not write_doc:
+        print('\n'.join(lines))
+        return
+
+    repository = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    document_path = os.path.join(repository, 'docs', 'RESULTS.md')
+    with open(document_path) as file:
+        document = file.read()
+    begin, end = '<!-- runs table: begin -->', '<!-- runs table: end -->'
+    before, rest = document.split(begin)
+    after = rest.split(end)[1]
+    with open(document_path, 'w') as file:
+        file.write(before + begin + '\n' + '\n'.join(lines) + '\n' + end + after)
+    print(f'{len(rows)} runs written to docs/RESULTS.md')
 
 
 if __name__ == '__main__':

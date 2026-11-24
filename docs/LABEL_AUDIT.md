@@ -77,6 +77,19 @@ hard clips were removed, so the audited columns are not a result: they show that
 not the architecture, set the old ceiling. Results of models trained on the audited labels are in
 `docs/RESULTS.md`.
 
+## Rounds 2 and 3
+
+- **Round 2**: the 95 clips disputed by the first model trained on the audited labels: 11
+  relabelled, 57 confirmed, 27 unjudgeable. It also showed that the windows re-cut around the
+  detected song did not always show what the labeller saw (placed after the song, or revealing a
+  terminal element beyond the clip's end), so training and evaluation went back to the clip as
+  labelled (`processing/apply_label_audit.py`).
+- **Round 3**: the 40 least confident clips labelled XB on which the model agreed: 4 show an X
+  element and no B, and were relabelled Unfinished. 28 newly disputed clips were not reviewed.
+
+Totals in `label_audit/clip_label_audit.csv`: 224 relabelled, 176 confirmed, 140 unjudgeable. The
+tables in this document are those of round 1.
+
 ## Caveats
 
 - Only disagreements were reviewed. Errors that every model reproduces (e.g. a consistent habit of
