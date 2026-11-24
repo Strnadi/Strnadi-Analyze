@@ -66,6 +66,9 @@ def main():
     if a.dedupe:
         rep = duplicate_groups()
         key = key.map(lambda g: rep.get(str(g).split('.')[0].upper(), g))
+        # every other table looks its recordings up here (training/data.py::duplicate_recordings)
+        duplicates = pd.Series(rep).rename('representative').rename_axis('recording')
+        duplicates.to_csv(workspace_path('data/duplicate_recordings.csv'))
     if a.group_map:
         gm = pd.read_csv(a.group_map)
         key = key.map(dict(zip(gm.grp, gm.key))).fillna(key)

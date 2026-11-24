@@ -11,7 +11,7 @@ A chunk is dropped if a trained model gives p(song) = 1 - p(None) above `--p_son
 A sheet of the dropped chunks is written for visual confirmation (figs/qa/noise_bank_dropped.png).
 
 Usage: python -m processing.clean_noise_bank --model runs/r2_s0 [--bank data/noise_bank_audiomoth.npy]
-                                              [--out data/noise_bank_clean.npy] [--p_song 0.3]
+                                              [--out data/noise_bank_clean.npy] [--p_song 0.5]
 """
 
 import argparse
@@ -30,7 +30,7 @@ def main():
     ap.add_argument('--model', required=True)
     ap.add_argument('--bank', default='data/noise_bank_audiomoth.npy')
     ap.add_argument('--out', default='data/noise_bank_clean.npy')
-    ap.add_argument('--p_song', type=float, default=0.3)
+    ap.add_argument('--p_song', type=float, default=0.5)
     ap.add_argument('--threads', type=int, default=2)
     a = ap.parse_args()
     torch.set_num_threads(a.threads)

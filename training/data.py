@@ -41,6 +41,20 @@ def read_table(path, **read_csv_arguments):
     )
 
 
+def duplicate_recordings():
+    """{recording id: id of the recording it is a byte-identical copy of}.
+
+    Written by `processing/make_folds.py --dedupe` (data/duplicate_recordings.csv). The citizen
+    archive holds ~90 groups of identical audio under different file ids; every table must put all
+    copies into the same cross-validation fold.
+    """
+    path = workspace_path('data/duplicate_recordings.csv')
+    if not os.path.exists(path):
+        return {}
+    table = pd.read_csv(path)
+    return dict(zip(table.recording.astype(str), table.representative.astype(str)))
+
+
 def load_seg(npy, t0, t1, n, raw=False):
     """Read `n` samples starting at `t0` seconds from a cached recording.
 

@@ -51,10 +51,12 @@ class TrainSettings:
     inner_validation_share: float = 0.15
 
     #: Which epoch's weights are kept:
+    #:   'inner_min_loss' lowest inner-validation loss (a checkpoint is written each time the loss
+    #:                    is lower than every earlier one)
     #:   'inner_smooth3'  best 3-epoch moving average of inner-validation macro-F1
     #:   'inner_argmax'   best single epoch on the inner validation set (research runs)
     #:   'last'           the last epoch (fixed schedule)
-    checkpoint_rule: str = 'inner_smooth3'
+    checkpoint_rule: str = 'inner_min_loss'
 
     #: Also score the test fold every epoch. For learning curves only; never used to choose anything.
     log_test_fold_curve: bool = True
@@ -125,8 +127,12 @@ class TrainSettings:
     measurement_loss_weight: float = 0.0
 
     # --------------------------------------------------------------------------------- runtime
-    threads: int = 4
-    data_workers: int = 2
+    #: 'cuda' trains on the GPU when one is available and falls back to the CPU otherwise.
+    device: str = 'cuda'
+    #: Half-precision network on the GPU (the spectrogram front-end always runs in full precision).
+    mixed_precision: bool = True
+    threads: int = 2
+    data_workers: int = 10
     compile_model: bool = False
 
     def spec_augment_arguments(self):

@@ -37,8 +37,11 @@ class TorchEnsemble:
     Calling it on a (N, samples) array returns averaged class probabilities (N, 7).
     """
 
-    def __init__(self, run_or_file, name='model.pt'):
-        self.models = [load_model(path) for path in run_checkpoints(run_or_file, name)]
+    def __init__(self, run_or_file, name='model.pt', device='cpu'):
+        self.device = torch.device(device)
+        self.models = [
+            load_model(path).to(self.device) for path in run_checkpoints(run_or_file, name)
+        ]
         if not self.models:
             raise FileNotFoundError(f'no checkpoints under {run_or_file}')
 
@@ -48,12 +51,12 @@ class TorchEnsemble:
         for model in self.models:
             outputs = []
             for start in range(0, len(batch), bs):
-                chunk = torch.from_numpy(batch[start : start + bs])
+                chunk = torch.from_numpy(batch[start : start + bs]).to(self.device)
                 outputs.append(model(chunk)[key])
             outputs = torch.cat(outputs)
             if key == 'logits':
                 outputs = torch.softmax(outputs, 1)
-            total = total + outputs.numpy()
+            total = total + outputs.float().cpu().numpy()
         return total / len(self.models)
 
     def embed(self, batch, bs=64):

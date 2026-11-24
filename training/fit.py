@@ -4,10 +4,12 @@
 
 trains one model per fold and writes, under `$STRNADI_WS/runs/<run_name>/fold<k>/`:
 
-    model.pt    the kept weights (see `TrainSettings.checkpoint_rule`)
+    best.pt     written every time the inner-validation loss reaches a new minimum
+    model.pt    the kept weights (see `TrainSettings.checkpoint_rule`; by default the same as best.pt)
     last.pt     the weights after the last epoch
     oof.npz     predictions for the fold's held-out clips ("out of fold")
     log.json    one entry per epoch: loss, inner-validation and test-fold scores
+    tb/         TensorBoard event files (`tensorboard --logdir $STRNADI_WS/runs`)
 
 Protocol for fold k:
 
@@ -32,6 +34,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 
 from augment.pipeline import WaveAugment
 from config import C2I, CLASSES, WS, dry_run, effective_run_name, workspace_path
@@ -59,13 +62,14 @@ from .data import (
     ClipDataset,
     EmbeddingStore,
     UnlabeledDataset,
+    duplicate_recordings,
     read_table,
 )
 from .ema import EMA
 from .metrics import metrics
 from .optim import build_optimizer
 from .sampler import pool_sampling_weights
-from .validation import predict_clips
+from .validation import load_eval_waveforms, mean_nll, predict_waveforms
 
 
 # =========================================================================== public entry points
@@ -136,13 +140,24 @@ def split_tables(settings, fold):
     if 'train_label' in train:
         train['label'] = train.train_label.fillna(train.label)
 
+    recording_fold = dict(zip(labelled.grp.astype(str), labelled.fold))
+    same_audio = duplicate_recordings()
+
     def usable_for_training(table):
-        """Drop rows of the test fold and of the inner-validation recordings."""
-        if 'fold' in table:
-            table = table[table.fold != fold]
+        """Drop rows of the test fold and of the inner-validation recordings.
+
+        A row of an extra table belongs to the fold of its recording in the labelled table (also
+        when the recording is a byte-identical copy filed under another id); only recordings
+        without labelled clips keep the fold written in their own table.
+        """
         if 'rec' in table:
             recording = table.rec.astype(str).str.replace('ncs:', '', regex=False)
-            table = table[~recording.isin(inner_recordings)]
+            recording = recording.map(lambda name: same_audio.get(name, name))
+            if 'fold' in table:
+                table = table.assign(fold=recording.map(recording_fold).fillna(table.fold))
+            table = table[~recording.isin(inner_recordings).values]
+        if 'fold' in table:
+            table = table[table.fold != fold]
         return table
 
     for path in settings.extra_tables:
@@ -174,6 +189,8 @@ def _pool_name(table_path):
 class CheckpointKeeper:
     """Decides which epoch's weights to keep.
 
+    'inner_min_loss' the epoch with the lowest inner-validation loss (the default: a checkpoint
+                     is kept only when the loss is lower than every earlier one);
     'inner_argmax'   the epoch with the best inner-validation score;
     'inner_smooth3'  the epoch with the best centred 3-epoch moving average of that score
                      (a single good epoch is often a fluke on a ~380-clip validation set);
@@ -186,10 +203,19 @@ class CheckpointKeeper:
         self.scores = []
         self.best_single = (-1.0, -1, None)  # (score, epoch, weights)
         self.best_smoothed = (-1.0, -1, None)
+        self.best_loss = (float('inf'), -1, None)  # (loss, epoch, weights)
         self.previous_weights = None
 
-    def update(self, epoch, weights, inner_score):
-        """Record this epoch's weights and inner-validation score (None if there is no inner set)."""
+    def update(self, epoch, weights, inner_score, inner_loss=None):
+        """Record this epoch's weights and inner-validation results (None if there is no inner set).
+
+        Returns True when the inner-validation loss reached a new minimum.
+        """
+        improved = False
+        if inner_loss is not None and inner_loss < self.best_loss[0]:
+            self.best_loss = (inner_loss, epoch, weights)
+            improved = True
+
         if inner_score is not None:
             self.scores.append(inner_score)
 
@@ -209,10 +235,13 @@ class CheckpointKeeper:
                     self.best_smoothed = (smoothed, epoch, weights)
 
         self.previous_weights = weights
+        return improved
 
     def chosen(self, last_weights):
         """Return (weights, epoch, rule actually applied)."""
         have_scores = len(self.scores) > 0
+        if self.rule == 'inner_min_loss' and self.best_loss[2] is not None:
+            return self.best_loss[2], self.best_loss[1], 'inner_min_loss'
         if self.rule == 'inner_argmax' and have_scores:
             return self.best_single[2], self.best_single[1], 'inner_argmax'
         if self.rule == 'inner_smooth3' and have_scores:
@@ -226,6 +255,7 @@ class CheckpointKeeper:
             'scores': self.scores,
             'best_single': self.best_single,
             'best_smoothed': self.best_smoothed,
+            'best_loss': self.best_loss,
             'previous_weights': self.previous_weights,
         }
 
@@ -233,6 +263,7 @@ class CheckpointKeeper:
         self.scores = state['scores']
         self.best_single = tuple(state['best_single'])
         self.best_smoothed = tuple(state['best_smoothed'])
+        self.best_loss = tuple(state.get('best_loss', (float('inf'), -1, None)))
         self.previous_weights = state['previous_weights']
 
 
@@ -246,6 +277,12 @@ class FoldTraining:
         self.out_dir = f'{WS}/runs/{run_name}/fold{fold}'
         os.makedirs(self.out_dir, exist_ok=True)
         self.resume_path = f'{self.out_dir}/resume.pt'
+
+        use_cuda = settings.device == 'cuda' and torch.cuda.is_available()
+        self.device = torch.device('cuda' if use_cuda else 'cpu')
+        self.mixed_precision = settings.mixed_precision and use_cuda
+        torch.backends.cudnn.benchmark = True
+        self.board = SummaryWriter(f'{self.out_dir}/tb')
 
         seed = settings.seed + fold
         torch.manual_seed(seed)
@@ -316,9 +353,19 @@ class FoldTraining:
         self.test_labels = self.test.label.map(C2I).values
         self.inner_labels = self.inner_validation.label.map(C2I).values
 
+        # The evaluation windows never change: read them once and keep them in memory.
+        self.inner_waveforms = load_eval_waveforms(self.inner_validation, settings, self.input_store)
+        self.test_waveforms = load_eval_waveforms(self.test, settings, self.input_store)
+
     def _loader_options(self):
         workers = self.settings.data_workers
-        return dict(num_workers=workers, drop_last=True, persistent_workers=workers > 0)
+        return dict(
+            num_workers=workers,
+            drop_last=True,
+            persistent_workers=workers > 0,
+            pin_memory=self.device.type == 'cuda',
+            prefetch_factor=4 if workers > 0 else None,
+        )
 
     def _endless_batches(self, dataset, batch_size):
         """An iterator that never runs out (sampling with replacement)."""
@@ -330,7 +377,7 @@ class FoldTraining:
 
     def _prepare_model(self, make_model):
         settings = self.settings
-        self.model = make_model().to(memory_format=torch.channels_last)
+        self.model = make_model().to(self.device).to(memory_format=torch.channels_last)
         print(
             f'{type(self.model).__name__}: {count_parameters(self.model):,} parameters', flush=True
         )
@@ -348,6 +395,7 @@ class FoldTraining:
         self.spec_augment = SpecAugment(
             **settings.spec_augment_arguments(), fill=getattr(self.model, 'spec_fill', 'zero')
         ).train()
+        self.grad_scaler = torch.amp.GradScaler('cuda', enabled=self.mixed_precision)
         self.mixstyle = None
         if settings.mixstyle_probability > 0:
             self.mixstyle = FreqMixStyle(settings.mixstyle_probability).train()
@@ -369,7 +417,7 @@ class FoldTraining:
             teacher_dir = settings.teacher_run
             if not os.path.isabs(teacher_dir):
                 teacher_dir = f'{WS}/runs/{teacher_dir}'
-            self.teacher = TorchEnsemble(teacher_dir)
+            self.teacher = TorchEnsemble(teacher_dir, device=self.device)
 
         # Projection of the student's embedding into the teacher's embedding space.
         self.distill_projection = None
@@ -381,7 +429,7 @@ class FoldTraining:
                     teacher_dim = self.teacher.models[0](example)['emb'].shape[1]
                 else:
                     teacher_dim = 1536  # Perch 2.0
-            self.distill_projection = DistillProjection(student_dim, teacher_dim)
+            self.distill_projection = DistillProjection(student_dim, teacher_dim).to(self.device)
 
         self.fixmatch = None
         if self.unlabelled_batches is not None:
@@ -389,8 +437,8 @@ class FoldTraining:
 
     def _example_input(self):
         if self.settings.inputs == 'wave':
-            return torch.zeros(2, self.settings.window_samples)
-        return next(iter(self.train_loader))['wave'][:2]
+            return torch.zeros(2, self.settings.window_samples, device=self.device)
+        return next(iter(self.train_loader))['wave'][:2].to(self.device)
 
     def _prepare_optimisation(self):
         settings = self.settings
@@ -420,14 +468,26 @@ class FoldTraining:
             mean_loss = self._train_one_epoch()
             entry = {'ep': epoch, 'loss': mean_loss, 't': time.time() - started}
 
-            weights = copy.deepcopy(self.ema.model.state_dict())
-            inner_score = self._validate(entry)
-            self.keeper.update(epoch, weights, inner_score)
+            weights = self._ema_weights_on_cpu()
+            inner_score, inner_loss = self._validate(entry)
+            improved = self.keeper.update(epoch, weights, inner_score, inner_loss)
+            if improved:
+                # Best practice: keep a checkpoint only when the validation loss is a new minimum.
+                save_model(
+                    f'{self.out_dir}/best.pt',
+                    weights,
+                    self.model,
+                    epoch,
+                    settings,
+                    inner_loss=inner_loss,
+                )
+            entry['new_best'] = improved
 
             self.log.append(entry)
             print(self.fold, entry, flush=True)
             with open(f'{self.out_dir}/log.json', 'w') as file:
                 json.dump(self.log, file)
+            self._write_board(epoch, entry)
             self._save_resume_point(epoch)
 
         return self._finish()
@@ -437,12 +497,18 @@ class FoldTraining:
         total_loss = 0.0
         n_batches = 0
         for batch in self.train_loader:
+            batch = {
+                name: value.to(self.device, non_blocking=True) if torch.is_tensor(value) else value
+                for name, value in batch.items()
+            }
             loss = self._training_loss(batch)
 
-            self.optimizer.zero_grad()
-            loss.backward()
+            self.optimizer.zero_grad(set_to_none=True)
+            self.grad_scaler.scale(loss).backward()
+            self.grad_scaler.unscale_(self.optimizer)
             nn.utils.clip_grad_norm_(self.trainable_parameters, self.settings.gradient_clip)
-            self.optimizer.step()
+            self.grad_scaler.step(self.optimizer)
+            self.grad_scaler.update()
             self.scheduler.step()
             self.ema.update(self.model)
 
@@ -450,28 +516,64 @@ class FoldTraining:
             n_batches += 1
         return total_loss / max(n_batches, 1)
 
+    def _ema_weights_on_cpu(self):
+        return {
+            name: value.detach().cpu().clone()
+            for name, value in self.ema.model.state_dict().items()
+        }
+
+    def _write_board(self, epoch, entry):
+        """One TensorBoard point per epoch for every number in the log entry."""
+        tags = {
+            'loss': 'loss/train',
+            'inner_loss': 'loss/inner_validation',
+            'val_loss': 'loss/test_fold_diagnostic',
+            'inner_macro_f1': 'macro_f1/inner_validation',
+            'val_macro_f1': 'macro_f1/test_fold_diagnostic',
+            'inner_acc': 'accuracy/inner_validation',
+            'val_acc': 'accuracy/test_fold_diagnostic',
+        }
+        for key, tag in tags.items():
+            if key in entry:
+                self.board.add_scalar(tag, entry[key], epoch)
+        for name, recall in entry.get('inner_recall', {}).items():
+            if recall is not None:
+                self.board.add_scalar(f'recall_inner_validation/{name}', recall, epoch)
+        self.board.add_scalar('learning_rate', self.optimizer.param_groups[0]['lr'], epoch)
+        self.board.flush()
+
     def _validate(self, entry):
-        """Score the EMA weights; fill `entry`; return the inner-validation macro-F1 (or None)."""
+        """Score the EMA weights and fill `entry`.
+
+        Returns:
+            (inner-validation macro-F1, inner-validation loss); both None without an inner set.
+        """
         settings = self.settings
         inner_score = None
+        inner_loss = None
 
         if len(self.inner_validation):
-            probabilities = predict_clips(
-                self.ema.model, self.inner_validation, settings, self.input_store
-            )
+            probabilities = self._predict(self.inner_waveforms)
             inner = metrics(self.inner_labels, probabilities)
             inner_score = inner['macro_f1']
+            inner_loss = mean_nll(self.inner_labels, probabilities)
             entry['inner_macro_f1'] = inner['macro_f1']
             entry['inner_acc'] = inner['acc']
+            entry['inner_loss'] = inner_loss
+            entry['inner_recall'] = inner['per_class_recall']
 
         if settings.log_test_fold_curve and len(self.test):
             # For learning curves only: this number is never used to choose anything.
-            probabilities = predict_clips(self.ema.model, self.test, settings, self.input_store)
+            probabilities = self._predict(self.test_waveforms)
             outer = metrics(self.test_labels, probabilities)
             entry['val_macro_f1'] = outer['macro_f1']
             entry['val_acc'] = outer['acc']
+            entry['val_loss'] = mean_nll(self.test_labels, probabilities)
 
-        return inner_score
+        return inner_score, inner_loss
+
+    def _predict(self, waveforms):
+        return predict_waveforms(self.ema.model, waveforms, self.device, self.mixed_precision)
 
     # -------------------------------------------------------------------------------- losses
     def _forward(self, waveforms, augment_spectrogram=True, extra_masking=False):
@@ -479,6 +581,8 @@ class FoldTraining:
         if self.takes_waveform:
             return self.compiled_model(waveforms)
 
+        # The spectrogram is computed in full precision (the log of a half-precision power
+        # underflows); the network itself runs in mixed precision on a GPU.
         spectrogram = self.model.frontend(waveforms).contiguous(memory_format=torch.channels_last)
         if augment_spectrogram:
             spectrogram = self.spec_augment(spectrogram)
@@ -486,7 +590,12 @@ class FoldTraining:
                 spectrogram = self.spec_augment(spectrogram)
             if self.mixstyle is not None:
                 spectrogram = self.mixstyle(spectrogram)
-        return self.compiled_model(spectrogram)
+        with torch.autocast('cuda', enabled=self.mixed_precision):
+            outputs = self.compiled_model(spectrogram)
+        return {
+            name: value.float() if torch.is_tensor(value) else value
+            for name, value in outputs.items()
+        }
 
     def _training_loss(self, batch):
         settings = self.settings
@@ -553,6 +662,7 @@ class FoldTraining:
 
     def _fixmatch_loss(self):
         weak_view, strong_view = next(self.unlabelled_batches)
+        weak_view, strong_view = weak_view.to(self.device), strong_view.to(self.device)
         with torch.no_grad():
             teacher_logits = self.ema.model(weak_view)['logits']
             pseudo_labels, confident = self.fixmatch.pseudo_labels(teacher_logits)
@@ -562,6 +672,7 @@ class FoldTraining:
 
     def _bag_loss(self):
         bags, dialects = next(self.bag_batches)  # (n_bags, bag_size, samples), (n_bags,)
+        bags, dialects = bags.to(self.device), dialects.to(self.device)
         bag_size = bags.shape[1]
         outputs = self._forward(bags.flatten(0, 1))
         if 'log_dialect' not in outputs:
@@ -615,7 +726,7 @@ class FoldTraining:
     def _finish(self):
         """Save the checkpoints, predict the held-out clips and return their metrics."""
         settings = self.settings
-        last_weights = copy.deepcopy(self.ema.model.state_dict())
+        last_weights = self._ema_weights_on_cpu()
         save_model(
             f'{self.out_dir}/last.pt', last_weights, self.model, settings.epochs - 1, settings
         )
@@ -626,7 +737,7 @@ class FoldTraining:
         )
 
         self.ema.model.load_state_dict(weights)
-        probabilities = predict_clips(self.ema.model, self.test, settings, self.input_store)
+        probabilities = self._predict(self.test_waveforms)
         np.savez(
             f'{self.out_dir}/oof.npz',
             p=probabilities,
@@ -643,7 +754,30 @@ class FoldTraining:
             os.remove(self.resume_path)
 
         sources = self.test.src.values if 'src' in self.test else None
-        return metrics(self.test_labels, probabilities, sources)
+        result = metrics(self.test_labels, probabilities, sources)
+        self._write_board_summary(result, epoch, rule)
+        return result
+
+    def _write_board_summary(self, result, epoch, rule):
+        """The held-out result of this fold as TensorBoard text, hyper-parameters and a figure."""
+        from evaluation.report import confusion_figure
+
+        self.board.add_text(
+            'held_out_fold',
+            f'kept epoch {epoch} ({rule}); macro-F1 {result["macro_f1"]:.3f}; '
+            f'accuracy {result["acc"]:.3f}; recall {result["per_class_recall"]}',
+        )
+        self.board.add_figure('confusion/held_out_fold', confusion_figure(np.array(result['cm'])))
+        simple_settings = {
+            name: value if isinstance(value, (int, float, str, bool)) else str(value)
+            for name, value in vars(self.settings).items()
+        }
+        self.board.add_hparams(
+            simple_settings,
+            {'hparam/macro_f1': result['macro_f1'], 'hparam/accuracy': result['acc']},
+            run_name='.',
+        )
+        self.board.close()
 
 
 # ============================================================================ classification loss
@@ -671,7 +805,7 @@ def classification_loss(outputs, targets, kinds, weights, settings):
 
     use_factorized_weak_loss = bool(is_candidate_set.any()) and 'log_dialect' in outputs
 
-    per_example = torch.zeros(len(logits))
+    per_example = torch.zeros(len(logits), device=logits.device)
     if has_full_label.any():
         per_example[has_full_label] = soft_cross_entropy(
             logits[has_full_label],
@@ -705,10 +839,17 @@ def classification_loss(outputs, targets, kinds, weights, settings):
 
 # ====================================================================================== helpers
 def _load_bank(path):
-    """Load a bank of audio chunks (.npy object array) from the workspace, or None."""
+    """Load a bank of audio chunks (.npy object array) from the workspace, or None.
+
+    Chunks of equal length are stacked into one array: the data-loader workers then share its
+    memory, where a Python list of arrays would be copied into every worker.
+    """
     if not path:
         return None
-    return list(np.load(workspace_path(path), allow_pickle=True))
+    chunks = list(np.load(workspace_path(path), allow_pickle=True))
+    if len({len(chunk) for chunk in chunks}) == 1:
+        return np.stack(chunks)
+    return chunks
 
 
 def _apply_environment_overrides(settings):

@@ -192,6 +192,19 @@ def probe_checkpoint(path, held_out_fold=0):
 
 
 # -------------------------------------------------------------------------------------- plots
+def confusion_figure(counts):
+    """A confusion-matrix figure from a (7, 7) array of counts (rows = label, columns = predicted)."""
+    import matplotlib
+
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    figure, ax = plt.subplots(figsize=(6.5, 5.5))
+    _draw_confusion(ax, np.asarray(counts))
+    figure.tight_layout()
+    return figure
+
+
 def plot_confusion_matrix(run, ax=None):
     """Confusion matrix of the out-of-fold predictions: counts, coloured by the share of each row."""
     import matplotlib.pyplot as plt
@@ -199,10 +212,13 @@ def plot_confusion_matrix(run, ax=None):
 
     predictions = load_run_predictions(run)
     counts = confusion_matrix(predictions.label, predictions.predicted, labels=CLASSES)
-    row_share = counts / counts.sum(1, keepdims=True).clip(1)
-
     if ax is None:
         _, ax = plt.subplots(figsize=(6.5, 5.5))
+    return _draw_confusion(ax, counts)
+
+
+def _draw_confusion(ax, counts):
+    row_share = counts / counts.sum(1, keepdims=True).clip(1)
     ax.imshow(row_share, cmap='Blues', vmin=0, vmax=1)
     for row in range(len(CLASSES)):
         for column in range(len(CLASSES)):
