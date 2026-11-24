@@ -66,6 +66,7 @@ def use_thesis_style(font_directory):
     )
     # text as outlines: the SVG then needs no font on the machine that typesets the thesis
     plt.rcParams['svg.fonttype'] = 'path'
+    plt.rcParams['mathtext.fontset'] = 'stix'  # formulas in a Times-like face
     # room between the text and what it describes: titles, axis labels and tick labels
     plt.rcParams.update(
         {'axes.titlepad': TITLE_PAD, 'axes.labelpad': 7, 'xtick.major.pad': 5, 'ytick.major.pad': 5}
@@ -160,74 +161,241 @@ def audit_prikladu(out):
 
 
 # --------------------------------------------------------------------------------- architecture
+#: The network from top to bottom: (stage heading, colours, [(block, what it does, data after it)]).
+ARCHITECTURE = [
+    (
+        None,
+        ('#f4f4f4', '#555555'),
+        [('Zvuk', 'čtyřsekundové okno nahrávky\nvzorkované na 32 kHz', '128 000 vzorků')],
+    ),
+    (
+        'PŘEDZPRACOVÁNÍ (pevné, neučí se)',
+        ('#e9f1fa', '#2f5d8a'),
+        [
+            (
+                'Log-mel\nspektrogram',
+                'okno 32 ms, krok 10 ms;\n128 melových pásem v rozsahu 1,5–11 kHz',
+                '128 pásem\n× 400 kroků',
+            ),
+            (
+                'Normalizace',
+                'od každého pásma se odečte jeho medián;\npřidá se kanál s polohou na ose frekvence',
+                '2 kanály\n× 128 pásem × 400 kroků',
+            ),
+        ],
+    ),
+    (
+        'DVOUROZMĚRNÁ KONVOLUČNÍ ČÁST',
+        ('#e8f3e3', '#38761d'),
+        [
+            (
+                'Reziduální\nstupně',
+                'úvodní konvoluce a 4 stupně s 16, 32, 64, 128\nkanály; frekvence se zmenší 16×, čas 4×',
+                '128 kanálů\n× 8 pásem × 100 kroků',
+            ),
+            (
+                'Frekvence\ndo kanálů',
+                '8 pásem se neprůměruje, ale skládá za sebe:\nabsolutní výška tónu zůstává zachována',
+                '160 příznaků\n× 100 kroků po 40 ms',
+            ),
+        ],
+    ),
+    (
+        'ČASOVÁ ČÁST',
+        ('#fcf3d9', '#a67c00'),
+        [
+            (
+                'Dilatované\nkonvoluce',
+                '3 vrstvy podél času s dosahem asi 1,5 s:\nčtou pořadí a vzájemnou výšku prvků',
+                '160 příznaků\n× 100 kroků',
+            ),
+            (
+                'Pooling\ns pozorností',
+                'každý krok dostane váhu; výsledkem je\nvážený průměr a odchylka příznaků',
+                '→ váhy pozornosti:\nhledání zpěvů v nahrávce',
+            ),
+        ],
+    ),
+    (
+        None,
+        ('#fdebd8', '#b45f06'),
+        [('Embedding', '128 čísel, která shrnují celé okno', '→ mapa a shlukování\nnahrávek')],
+    ),
+]
+
+
 @figure
 def architektura(out):
-    """Block diagram of the network."""
-    blocks = [
-        ('zvuk\n4 s, 32 kHz', '128 000 vzorků', '#f2f2f2'),
-        ('log-mel\nspektrogram', '128 pásem × 400 kroků\n1,5–11 kHz, 10 ms', '#dbe9f6'),
-        ('medián\npo pásmech', 'odečtení pozadí\n+ kanál frekvence', '#dbe9f6'),
-        ('4 reziduální\nstupně', '16–32–64–128 kanálů\n8 pásem × 100 kroků', '#d9ead3'),
-        ('frekvence\ndo kanálů', '1 024 → 160 příznaků\nna časový krok', '#d9ead3'),
-        ('dilatované\nkonvoluce', '3 vrstvy v čase\ndosah ≈ 1,5 s', '#fff2cc'),
-        ('pooling\ns pozorností', 'vážený průměr\na odchylka', '#fff2cc'),
-        ('embedding', '128 čísel', '#fce5cd'),
-    ]
-    fig, ax = plt.subplots(figsize=(12, 4.6))
-    ax.set_xlim(0, 12)
-    ax.set_ylim(0, 4.6)
-    ax.axis('off')
-    width, gap, y = 1.28, 0.2, 2.5
-    for index, (title, detail, colour) in enumerate(blocks):
-        x = 0.1 + index * (width + gap)
-        ax.add_patch(
-            FancyBboxPatch((x, y), width, 1.3, boxstyle='round,pad=0.03', fc=colour, ec='#555555')
-        )
-        ax.text(
-            x + width / 2, y + 0.85, title, ha='center', va='center', fontsize=10.5, weight='bold'
-        )
-        ax.text(x + width / 2, y + 0.3, detail, ha='center', va='center', fontsize=7.2)
-        if index:
-            ax.annotate(
-                '',
-                (x - 0.01, y + 0.65),
-                (x - gap + 0.01, y + 0.65),
-                arrowprops=dict(arrowstyle='->', color='#333333'),
-            )
+    """The network as a top-to-bottom flow: block, what it does, the data that leaves it.
 
-    # the factorised head under the embedding
-    head_x = 0.1 + 7 * (width + gap)
-    questions = [
-        ('je to zpěv strnada?', 'p(zpěv)'),
-        ('je zpěv úplný?', 'p(úplný | zpěv)'),
-        ('které nářečí?', 'q(nářečí | úplný)'),
-    ]
-    for index, (question, symbol) in enumerate(questions):
-        x = head_x - 6.2 + index * 2.5
+    Drawn at the width of the thesis text block, so the font sizes are those of the print.
+    """
+    width, block_height, block_gap, stage_gap = 6.3, 0.46, 0.15, 0.17
+    heading_height, panel_pad = 0.25, 0.09
+    left, block_width, name_width = 0.14, 4.3, 1.12  # the block, and its name column
+    data_x = left + block_width + 0.14  # the column with the data shapes
+    fork_height = 0.18  # room under the head's heading where the path splits in three
+    question_height, classes_gap, classes_height = 0.56, 0.26, 0.8
+    head_height = (
+        heading_height + fork_height + question_height + classes_gap + classes_height + panel_pad
+    )
+
+    n_blocks = sum(len(blocks) for _, _, blocks in ARCHITECTURE)
+    n_panels = sum(heading is not None for heading, _, _ in ARCHITECTURE)
+    height = (
+        n_blocks * block_height
+        + (n_blocks - len(ARCHITECTURE)) * block_gap
+        + n_panels * (heading_height + panel_pad)
+        + len(ARCHITECTURE) * stage_gap
+        + head_height
+        + 0.1
+    )
+    fig = plt.figure(figsize=(width, height))
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, width)
+    ax.set_ylim(0, height)
+    ax.axis('off')
+    arrow = {'arrowstyle': '-|>', 'color': '#333333', 'lw': 1.1, 'shrinkA': 0, 'shrinkB': 0}
+    centre = left + block_width / 2
+
+    def box(x, y, box_width, box_height, fill, edge, line_width=1.0):
+        style = 'round,pad=0,rounding_size=0.06'
         ax.add_patch(
             FancyBboxPatch(
-                (x, 0.55), 2.2, 0.95, boxstyle='round,pad=0.03', fc='#ead1dc', ec='#555555'
+                (x, y), box_width, box_height, boxstyle=style, fc=fill, ec=edge, lw=line_width
             )
         )
-        ax.text(x + 1.1, 1.2, question, ha='center', va='center', fontsize=10, weight='bold')
-        ax.text(x + 1.1, 0.8, symbol, ha='center', va='center', fontsize=9)
+
+    y = height - 0.05
+    previous_bottom = None
+    for heading, (tint, accent), blocks in ARCHITECTURE:
+        stage_height = len(blocks) * block_height + (len(blocks) - 1) * block_gap
+        if heading:
+            panel_height = heading_height + stage_height + panel_pad
+            box(0.02, y - panel_height, width - 0.04, panel_height, tint, 'none')
+            ax.text(
+                width - left,
+                y - 0.16,
+                heading,
+                fontsize=8,
+                weight='bold',
+                color=accent,
+                va='center',
+                ha='right',
+            )
+            y -= heading_height
+        for name, detail, data in blocks:
+            top = y
+            if previous_bottom is not None:
+                ax.annotate(
+                    '', (centre, top + 0.01), (centre, previous_bottom - 0.01), arrowprops=arrow
+                )
+            fill = tint if not heading else 'white'
+            box(left, top - block_height, block_width, block_height, fill, accent)
+            middle = top - block_height / 2
+            ax.text(
+                left + 0.12, middle, name, fontsize=10, weight='bold', va='center', linespacing=1.05
+            )
+            ax.text(
+                left + name_width + 0.12, middle, detail, fontsize=8.6, va='center', linespacing=1.2
+            )
+            is_output = data.startswith('→')
+            ax.text(
+                data_x,
+                middle,
+                data,
+                fontsize=8.2,
+                va='center',
+                linespacing=1.2,
+                color=accent if is_output else '#444444',
+                style='normal' if is_output else 'italic',
+            )
+            previous_bottom = top - block_height
+            y = previous_bottom - block_gap
+        y += block_gap
+        if heading:
+            y -= panel_pad
+        y -= stage_gap
+
+    # --- the factorised head: three questions, and how their answers make the seven classes
+    tint, accent = '#f6e9f0', '#8e3a66'
+    box(0.02, y - head_height, width - 0.04, head_height, tint, 'none')
+    ax.text(
+        width - left,
+        y - 0.16,
+        'FAKTORIZOVANÁ HLAVA',
+        fontsize=8,
+        weight='bold',
+        color=accent,
+        va='center',
+        ha='right',
+    )
+    question_top = y - heading_height - fork_height
+    question_width, question_gap = 1.9, 0.16
+    questions = [
+        ('Zpívá strnad?', r'$p_{\mathrm{z}}$'),
+        ('Je zpěv úplný?', r'$p_{\mathrm{ú}}$'),
+        ('Které nářečí?', r'$q_{\mathrm{nářečí}}$'),
+    ]
+    classes_top = question_top - question_height - classes_gap
+    question_centres = []
+    for index, (question, symbol) in enumerate(questions):
+        x = left + index * (question_width + question_gap)
+        box(x, question_top - question_height, question_width, question_height, 'white', accent)
+        ax.text(
+            x + question_width / 2,
+            question_top - 0.18,
+            question,
+            fontsize=10,
+            weight='bold',
+            ha='center',
+            va='center',
+        )
+        ax.text(
+            x + question_width / 2,
+            question_top - 0.41,
+            symbol,
+            fontsize=10.5,
+            ha='center',
+            va='center',
+        )
+        question_centres.append(x + question_width / 2)
         ax.annotate(
             '',
-            (x + 1.1, 1.53),
-            (head_x + width / 2, y - 0.02),
-            arrowprops=dict(arrowstyle='->', color='#333333'),
+            (x + question_width / 2, classes_top + 0.01),
+            (x + question_width / 2, question_top - question_height - 0.01),
+            arrowprops=arrow,
         )
+    # embedding -> the three questions
+    fork_y = question_top + fork_height * 0.6
+    ax.plot([centre, centre], [previous_bottom - 0.01, fork_y], color='#333333', lw=1.1)
+    ax.plot([question_centres[0], question_centres[-1]], [fork_y, fork_y], color='#333333', lw=1.1)
+    for x in question_centres:
+        ax.annotate('', (x, question_top + 0.01), (x, fork_y), arrowprops=arrow)
+
+    classes_width = 3 * question_width + 2 * question_gap
+    box(left, classes_top - classes_height, classes_width, classes_height, 'white', accent, 1.4)
     ax.text(
-        head_x - 6.2,
-        0.2,
-        'faktorizovaná hlava: sedm tříd vzniká součinem tří odpovědí',
-        fontsize=9.5,
-        style='italic',
+        left + 0.12,
+        classes_top - 0.15,
+        'Sedm tříd jako součin tří odpovědí',
+        fontsize=8.6,
+        weight='bold',
+        color=accent,
+        va='center',
     )
-    ax.text(0.1, 4.2, 'předzpracování', fontsize=9.5, color='#2f5d8a')
-    ax.text(0.1 + 3 * (width + gap), 4.2, '2D konvoluční část', fontsize=9.5, color='#38761d')
-    ax.text(0.1 + 5 * (width + gap), 4.2, 'časová část', fontsize=9.5, color='#a67c00')
-    save(fig, out, 'architektura', bbox_inches='tight')
+    classes = [
+        ('bez strnada', r'$1 - p_{\mathrm{z}}$'),
+        ('nedozpívaný', r'$p_{\mathrm{z}}\,(1 - p_{\mathrm{ú}})$'),
+        (
+            'BC, BE, BhBl, BlBh, XB',
+            r'$p_{\mathrm{z}} \cdot p_{\mathrm{ú}} \cdot q_{\mathrm{nářečí}}$',
+        ),
+    ]
+    for x, (name, formula) in zip(question_centres, classes):
+        ax.text(x, classes_top - 0.39, name, fontsize=9.6, weight='bold', ha='center', va='center')
+        ax.text(x, classes_top - 0.63, formula, fontsize=10.5, ha='center', va='center')
+    save(fig, out, 'architektura')
 
 
 @figure
