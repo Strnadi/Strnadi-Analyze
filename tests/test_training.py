@@ -253,7 +253,7 @@ def test_resume():
     loss = interrupted._train_one_epoch()
     entry = {'ep': 0, 'loss': loss, 't': 0.0}
     weights = copy.deepcopy(interrupted.ema.model.state_dict())
-    interrupted.keeper.update(0, weights, interrupted._validate(entry))
+    interrupted.keeper.update(0, weights, *interrupted._validate(entry))
     interrupted.log.append(entry)
     interrupted._save_resume_point(0)
 

@@ -77,6 +77,8 @@ class FreeMatch:
         """
         teacher_probs = torch.softmax(teacher_logits, 1)  # (B, C)
         confidence, label = teacher_probs.max(1)  # both (B,)
+        # the running averages follow the model to its device (they start on the CPU)
+        self.tau, self.pc = self.tau.to(teacher_probs.device), self.pc.to(teacher_probs.device)
 
         # Exponential moving averages of the mean confidence and of the mean class probabilities.
         keep = self.m

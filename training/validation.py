@@ -28,7 +28,8 @@ def predict_waveforms(model, waveforms, device='cpu', mixed_precision=False, bat
     probabilities = []
     for start in range(0, len(waveforms), batch_size):
         batch = waveforms[start : start + batch_size].to(device)
-        if getattr(model, 'frontend', None) is not None and batch.dim() == 2:
+        takes_waveform = getattr(model, 'wave_input', False) or getattr(model, 'frontend', None) is None
+        if not takes_waveform and batch.dim() == 2:
             # spectrogram in full precision, network in mixed precision (as in training)
             spectrogram = model.frontend(batch)
             with torch.autocast('cuda', enabled=mixed_precision):

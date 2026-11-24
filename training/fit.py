@@ -107,6 +107,33 @@ def cross_validate(run_name, make_model, settings):
     return results
 
 
+#: "Fold" number of the final model: no labelled clip has it, so nothing is held out.
+ALL_DATA = 99
+
+
+def train_final_model(run_name, make_model, settings):
+    """Train the model that is shipped: on the labelled clips of ALL folds.
+
+    Nothing is held out for testing, so this run has no accuracy of its own: its expected accuracy
+    is the cross-validated result of the same recipe (`cross_validate` with the same settings).
+    The inner validation set (a share of the recordings, never trained on) still chooses the
+    checkpoint with the lowest validation loss.
+
+    Writes `$STRNADI_WS/runs/<run_name>/final/` with `best.pt`, `model.pt`, `last.pt`, `log.json`
+    and TensorBoard files. Returns the path of `model.pt`.
+    """
+    settings = _apply_environment_overrides(settings)
+    run_name = effective_run_name(run_name)
+    if dry_run():
+        _dry_run(run_name, make_model, settings)
+        return None
+
+    torch.set_num_threads(settings.threads)
+    os.makedirs(f'{WS}/runs/{run_name}', exist_ok=True)
+    FoldTraining(run_name, make_model, settings, ALL_DATA).run()
+    return f'{WS}/runs/{run_name}/final/model.pt'
+
+
 def fit_fold(run_name, make_model, settings, fold):
     """Train one fold and return the metrics on its held-out clips."""
     return FoldTraining(run_name, make_model, settings, fold).run()
@@ -274,7 +301,8 @@ class FoldTraining:
     def __init__(self, run_name, make_model, settings, fold):
         self.settings = settings
         self.fold = fold
-        self.out_dir = f'{WS}/runs/{run_name}/fold{fold}'
+        directory = 'final' if fold == ALL_DATA else f'fold{fold}'
+        self.out_dir = f'{WS}/runs/{run_name}/{directory}'
         os.makedirs(self.out_dir, exist_ok=True)
         self.resume_path = f'{self.out_dir}/resume.pt'
 
@@ -736,6 +764,12 @@ class FoldTraining:
             f'{self.out_dir}/model.pt', weights, self.model, epoch, settings, checkpoint_rule=rule
         )
 
+        if os.path.exists(self.resume_path):
+            os.remove(self.resume_path)
+        if len(self.test) == 0:  # the final model: nothing was held out
+            self.board.close()
+            return None
+
         self.ema.model.load_state_dict(weights)
         probabilities = self._predict(self.test_waveforms)
         np.savez(
@@ -749,9 +783,6 @@ class FoldTraining:
             select=rule,
             epoch=epoch,
         )
-
-        if os.path.exists(self.resume_path):
-            os.remove(self.resume_path)
 
         sources = self.test.src.values if 'src' in self.test else None
         result = metrics(self.test_labels, probabilities, sources)
