@@ -122,12 +122,16 @@ def song_answers(probabilities, attention_peak):
 
 
 # ------------------------------------------------------------------------- blind detection
-def detect_songs(starts, probabilities, attention_peak, hop_seconds, min_votes=3.0):
+def detect_songs(starts, probabilities, attention_peak, hop_seconds, min_votes=None):
     """Find songs in a scanned recording from the windows alone.
 
     Returns:
         list of (ending time in seconds, class index) for every detected song.
     """
+    if min_votes is None:
+        min_votes = (
+            0.6 / hop_seconds
+        )  # three full-weight windows at a 0.2 s hop, fewer when sparser
     p_song = 1 - probabilities[:, NONE_IDX]
     weights = p_song * centred_weight(attention_peak) * (p_song > 0.5)
     vote_time = starts + attention_peak
@@ -138,7 +142,11 @@ def detect_songs(starts, probabilities, attention_peak, hop_seconds, min_votes=3
     class_votes = np.zeros((n_bins, probabilities.shape[1]))
     np.add.at(class_votes, bins, probabilities * weights[:, None])
 
-    kernel = np.array([0.5, 1.0, 1.0, 1.0, 0.5])  # ~0.8 s: one song's votes fall into one bump
+    half_width = max(
+        1, int(round(0.4 / hop_seconds))
+    )  # ~0.8 s: one song's votes fall into one bump
+    kernel = np.ones(2 * half_width + 1)
+    kernel[[0, -1]] = 0.5
     smoothed = np.convolve(votes, kernel, mode='same')
     smoothed_classes = np.stack(
         [

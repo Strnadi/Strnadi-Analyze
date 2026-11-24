@@ -13,7 +13,8 @@ script lets the cross-validated models label the rest, and keeps a label only wh
 3. **two readings agree**: the class head and the decoded element sequence (`losses/element_ctc`)
    name the same class.
 
-Nothing existing is modified: the result is a new table. Rows keep the columns of the weak tables
+Nothing existing is modified: the result is a new table. With `--songs <table>` the songs of
+another table are labelled instead, e.g. those found by `processing/harvest_songs_by_scan.py`. Rows keep the columns of the weak tables
 and gain
 
     label_fold0 .. label_fold4   the label given by the teachers that did NOT train on that fold
@@ -47,18 +48,26 @@ WINDOW_SAMPLES = 128000
 
 
 # --------------------------------------------------------------------------------- candidates
-def unlabelled_songs(labelled_table):
+def unlabelled_songs(labelled_table, songs_table=None, only_new=False):
     """Every detected song without a human label, with its candidate set and its fold."""
-    weak = read_table('data/weak_v5.csv')
-    weak = weak[weak.label.str.contains('|', regex=False)].copy()
-    weak['candidates'] = weak.label
+    if songs_table:
+        # a table written by processing/harvest_songs_by_scan.py: the label column is the
+        # recording's candidate set (empty when it has none)
+        songs = read_table(songs_table)
+        if only_new:
+            songs = songs[~songs.already_harvested]
+        songs['candidates'] = songs.label.fillna('')
+    else:
+        weak = read_table('data/weak_v5.csv')
+        weak = weak[weak.label.str.contains('|', regex=False)].copy()
+        weak['candidates'] = weak.label
 
-    detections = read_table('data/unlabeled_v4.csv')
-    detections = detections[detections.source == 'birdnet_yh'].copy()
-    detections['candidates'] = ''  # a BirdNET detection says "Yellowhammer", nothing about dialect
-    detections['w'], detections['sw'] = 1.0, 1.0
+        detections = read_table('data/unlabeled_v4.csv')
+        detections = detections[detections.source == 'birdnet_yh'].copy()
+        detections['candidates'] = ''  # a BirdNET detection says "Yellowhammer", nothing more
+        detections['w'], detections['sw'] = 1.0, 1.0
 
-    songs = pd.concat([weak, detections], ignore_index=True).drop_duplicates('name')
+        songs = pd.concat([weak, detections], ignore_index=True).drop_duplicates('name')
 
     # the fold of a song is the fold of its recording among the labelled clips, where it has one
     labelled = read_table(labelled_table)
@@ -151,13 +160,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--runs', nargs='+', required=True)
     parser.add_argument('--labelled', default='data/clips_audited.csv')
+    parser.add_argument('--songs', help='label this table instead of the weak tables')
+    parser.add_argument(
+        '--only-new', action='store_true', help='skip rows marked already_harvested'
+    )
     parser.add_argument('--out', default='data/songs_machine_labelled.csv')
     parser.add_argument('--confidence', type=float, default=0.9)
     parser.add_argument('--workers', type=int, default=12)
     arguments = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    songs = unlabelled_songs(arguments.labelled)
+    songs = unlabelled_songs(arguments.labelled, arguments.songs, arguments.only_new)
     print(f'{len(songs)} unlabelled songs:', songs.source.value_counts().to_dict(), flush=True)
 
     probabilities, sequence_class = teacher_readings(
