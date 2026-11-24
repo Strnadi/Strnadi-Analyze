@@ -1,14 +1,17 @@
 # %% [markdown]
 # # history_hard_negatives_codec
 #
-# R5: R2 + 6,865 other-species windows as "None" + phone-codec round-trips (AAC / Opus / MP3) on
+# *Run of the research session on the ORIGINAL clip labels, kept for the record. Its stored
+# predictions carry the run name given in `docs/RESEARCH_LOG.md`.*
+#
+# The weak-pool recipe with the factorised head, plus 6,865 other-species windows as "None" + phone-codec round-trips (AAC / Opus / MP3) on
 # 15 % of clips.
 #
 # **Question.** Fewer false alarms on similar trills (Chiffchaff, Chaffinch, ...) and robustness
 # to app audio compression.
 #
 # **Status:** done (from the research session). 5 folds: macro-F1 0.761, acc 0.867; -0.013 against
-# R2, P(R2 better) 0.95. None recall +0.048 (the hard negatives work), dialects worse (BC -0.015, XB
+# the run without them, P(reference better) 0.95. None recall +0.048 (the hard negatives work), dialects worse (BC -0.015, XB
 # -0.022, BhBl -0.035). To be retried with a lower share of hard negatives; the codec part cannot
 # show a benefit without phone audio (research log 17.5, device_robustness.py).
 #

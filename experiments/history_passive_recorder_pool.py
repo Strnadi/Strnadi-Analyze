@@ -1,12 +1,15 @@
 # %% [markdown]
 # # history_passive_recorder_pool
 #
-# R6: R2 + 38k weak songs {BhBl, Unfinished, None} from 28 JCU AudioMoth recorders (passive, far-
+# *Run of the research session on the ORIGINAL clip labels, kept for the record. Its stored
+# predictions carry the run name given in `docs/RESEARCH_LOG.md`.*
+#
+# The weak-pool recipe with the factorised head, plus 38k weak songs {BhBl, Unfinished, None} from 28 JCU AudioMoth recorders (passive, far-
 # field).
 #
 # **Question.** Passive-recorder data makes the model robust in that domain.
 #
-# **Status:** running (from the research session). Folds 0-2: macro-F1 0.780 (R2 on the same folds:
+# **Status:** running (from the research session). Folds 0-2: macro-F1 0.780 (`history_weak_pools_factorized_head` on the same folds:
 # about 0.78), BlBh recall 0.74; folds 3-4 were training on 2026-11-23. Review warnings: (1) every
 # passive-recorder training song is constrained to BhBl, so "passive acoustics => BhBl" is a
 # learnable shortcut, and the JCU "wrong-dialect rate" metric rewards it; this is the main risk for

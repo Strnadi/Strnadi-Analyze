@@ -1,15 +1,18 @@
 # %% [markdown]
 # # history_fixmatch_unlabelled
 #
-# R4: R2 + FixMatch / FreeMatch consistency on 77.5k unlabelled songs (EMA teacher, adaptive
+# *Run of the research session on the ORIGINAL clip labels, kept for the record. Its stored
+# predictions carry the run name given in `docs/RESEARCH_LOG.md`.*
+#
+# The weak-pool recipe with the factorised head, plus FixMatch / FreeMatch consistency on 77.5k unlabelled songs (EMA teacher, adaptive
 # thresholds).
 #
 # **Question.** Semi-supervised training inside the main loop is worth more than separate
 # pretraining at this scale.
 #
-# **Status:** done (from the research session). 5 folds: macro-F1 0.775 (R2: 0.774), difference
-# -0.001 [-0.015, +0.013]. R2 is ahead on BhBl (+0.035) and BlBh (+0.051) recall; expert bird-level
-# accuracy 0.924 (R2: 0.939). FixMatch gives no gain at this scale and was not adopted (research log
+# **Status:** done (from the research session). 5 folds: macro-F1 0.775 (factorised head without it: 0.774), difference
+# -0.001 [-0.015, +0.013]. The run without FixMatch is ahead on BhBl (+0.035) and BlBh (+0.051) recall; expert bird-level
+# accuracy 0.924 (without FixMatch: 0.939). FixMatch gives no gain at this scale and was not adopted (research log
 # 17.5). The review caveat explains why: the pseudo-labels come from the model itself. Retry only
 # with a strong teacher (distill_function_matching.py).
 #

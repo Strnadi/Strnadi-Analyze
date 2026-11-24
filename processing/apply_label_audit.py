@@ -5,6 +5,7 @@
 Reads   data/orig_aligned.csv                  the 4,089 labelled clips and where each one sits in
                                                its source recording
         label_audit/clip_label_audit.csv       (in the repository) one row per reviewed clip
+        label_audit/clip_folds.csv             (in the repository) the fold of every clip
 Writes  data/clips_audited.csv                 clips with the audited label, duplicate-free folds
         data/clips_unjudgeable.csv             reviewed clips whose content cannot be decided
         data/duplicate_recordings.csv          byte-identical recordings (all tables share folds)
@@ -37,6 +38,7 @@ CONTEXT_SECONDS = 0.2  # real audio kept on either side of a located clip
 
 REPOSITORY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AUDIT_TABLE = os.path.join(REPOSITORY, 'label_audit', 'clip_label_audit.csv')
+FOLD_TABLE = os.path.join(REPOSITORY, 'label_audit', 'clip_folds.csv')
 
 
 def audited_clips():
@@ -121,8 +123,30 @@ def assign_folds(clips, n_folds=5, n_tries=20):
     return clips
 
 
+def stored_folds(clips):
+    """Use the folds kept in the repository, so that a later label correction cannot reshuffle them.
+
+    Results stay comparable across audit rounds only if every clip keeps its fold. Returns None
+    when the stored table does not cover all clips (then new folds are drawn and stored).
+    """
+    if not os.path.exists(FOLD_TABLE):
+        return None
+    stored = pd.read_csv(FOLD_TABLE, keep_default_na=False).set_index('name')
+    if not clips.name.isin(stored.index).all():
+        return None
+    clips['grp'] = clips.name.map(stored.grp)
+    clips['fold'] = clips.name.map(stored.fold).astype(int)
+    return clips
+
+
 def main():
-    clips = assign_folds(audited_clips())
+    clips = audited_clips()
+    with_stored_folds = stored_folds(clips)
+    if with_stored_folds is None:
+        clips = assign_folds(clips)
+        clips[['name', 'grp', 'fold']].sort_values('name').to_csv(FOLD_TABLE, index=False)
+    else:
+        clips = with_stored_folds
 
     unjudgeable = clips.audit == 'unjudgeable'
     clips[unjudgeable].to_csv(workspace_path('data/clips_unjudgeable.csv'), index=False)

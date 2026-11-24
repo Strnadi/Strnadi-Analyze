@@ -1,15 +1,18 @@
 # %% [markdown]
 # # history_recut_windows
 #
-# R7: R2 + the fixes found by looking at spectrograms: strong clips re-cut around the whole song
+# *Run of the research session on the ORIGINAL clip labels, kept for the record. Its stored
+# predictions carry the run name given in `docs/RESEARCH_LOG.md`.*
+#
+# The weak-pool recipe with the factorised head, plus the fixes found by looking at spectrograms: strong clips re-cut around the whole song
 # (2,740 windows moved), counterfactual truncations filled with spectrally matched background
 # (cf_v4), SNR measured in the song band.
 #
-# **Question.** Many R2 "errors" were clips starting mid-song or zero-padded; clean windows and
-# clean synthetic data beat R2.
+# **Question.** Many "errors" of `history_weak_pools_factorized_head` were clips starting mid-song or zero-padded; clean windows and
+# clean synthetic data beat it.
 #
 # **Status:** running (from the research session). Started 2026-11-23 on weak_v5 (clean window
-# placement, research log 17.2) with the repaired loader (17.3). Compare it with R2 re-scored on the
+# placement, research log 17.2) with the repaired loader (17.3). Compare it with `history_weak_pools_factorized_head` re-scored on the
 # same windows, macro-F1 0.770 (17.7), not with 0.774. Caveats: 23 moved "Unfinished" windows now
 # show a terminal element the labeller never saw (results/expert_audit.csv); the noise bank still
 # contains Yellowhammer songs; BirdNET-app clips stay unaligned, so window placement correlates with

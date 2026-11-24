@@ -14,12 +14,14 @@ Classes: `BC, BE, BhBl, BlBh, None, Unfinished, XB`. Every model takes a mono 32
 | `model/` | One model per file, assembled from layers. Each file can be run for a quick look: `python -m model.strnadnet` |
 | `layers/` | One layer variant per file: front-ends, conv blocks, temporal modules, pooling, heads |
 | `augment/`, `losses/` | One waveform augmentation / one loss per file |
-| `training/` | What the experiment scripts call: `settings.py` (every setting with its default), `fit.py` (cross-validated training), `data.py`, plus `pretrain.py`, `unsupervised.py`, `bird_level.py`, `identity.py` |
-| `evaluation/` | `report.py` = the shared evaluation functions (validation, metrics, confusion matrix, learning curves, error sheets); further evaluation scripts |
-| `processing/` | Data preparation: decoding, song segmentation, table builders, BirdNET / Perch extraction |
+| `training/` | What the experiment scripts call: `settings.py` (every setting with its default), `fit.py` (cross-validated training on the GPU, TensorBoard logging, best-validation-loss checkpoints, `train_final_model`), `data.py`, plus `pretrain.py`, `unsupervised.py`, `bird_level.py`, `identity.py` |
+| `evaluation/` | `report.py` (metrics, confusion matrix, learning curves, error sheets), `explain_model.py` (occlusion maps, deletion test), `element_sequences.py` (decoded song elements), `embedding_map.py` (2-D map), `review_sheets.py` (label review), `compare_runs.py`; `research_session/` = the first session's scripts, kept as they were |
+| `label_audit/` | `clip_label_audit.csv`: the verdict on every clip whose label was reviewed by eye (`docs/LABEL_AUDIT.md`) |
+| `processing/` | Data preparation: decoding, song segmentation, table builders, `apply_label_audit.py`, BirdNET / Perch extraction |
 | `serving/` | ONNX and TFLite export, song-level inference pipeline, FastAPI app (`runner.py` is the entry point) |
 | `data-generation/`, `vastai-serverless/` | The labelling web app; the Vast.ai worker in front of the service |
-| `tests/`, `tools/`, `docs/` | Tests and checks; small utilities; `docs/REVIEW.md` (findings), `docs/STATUS.md` (what is verified) |
+| `tests/`, `tools/` | Tests and checks; `results_table.py` (all runs on one table), `run_queue.sh` (experiments one after another), `list_experiments.py` |
+| `docs/` | **`RESULTS.md` (current numbers, start here)**, `LABEL_AUDIT.md`, `CONTINUATION.md` (project background and open questions), `RESEARCH_LOG.md` and `REVIEW.md` (history) |
 
 `config.py` holds the class list and the paths. Data lives outside the repository, under
 `$STRNADI_WS` (audio cache, tables, runs, results, figures) and `$STRNADI_SRC` (raw recordings).
@@ -28,7 +30,7 @@ Classes: `BC, BE, BhBl, BlBh, None, Unfinished, XB`. Every model takes a mono 32
 
 ```python
 # %% [markdown]
-# # r2_factorized_weak
+# # strnadnet_audited_labels
 # What it is, the question it answers, its status and measured result.
 
 # %% Imports
@@ -38,11 +40,11 @@ from training.fit import cross_validate
 from training.settings import TrainSettings
 
 # %% Settings (everything not listed keeps its default from training/settings.py)
-RUN = 'r2_factorized_weak'
+RUN = 'strnadnet_audited_labels'
 settings = TrainSettings(
-    labelled_table='data/orig_index.csv',
-    extra_tables={'data/weak_v3.csv': 0.35, 'data/cf_v3.csv': 0.08, 'data/vizann_v1.csv': 0.07},
-    noise_bank='data/noise_bank_audiomoth.npy',
+    labelled_table='data/clips_audited.csv',
+    extra_tables={'data/weak_v5.csv': 0.35, 'data/cf_v4.csv': 0.08, 'data/vizann_v1.csv': 0.07},
+    noise_bank='data/noise_bank_clean.npy',
     noise_probability=0.5,
     ...
 )
@@ -68,13 +70,20 @@ All commands run from the repository root.
 
 ```bash
 python -m tools.list_experiments                      # every experiment with status and origin
-python -m experiments.r2_factorized_weak              # train all folds, then evaluate
-STRNADI_FOLDS=0,1 STRNADI_THREADS=5 python -m experiments.r2_factorized_weak   # some folds only
-STRNADI_SEED=1 python -m experiments.r2_factorized_weak                        # stored as ..._s1
+python -m experiments.strnadnet_audited_labels        # train all folds, then evaluate
+STRNADI_FOLDS=0,1 python -m experiments.strnadnet_audited_labels               # some folds only
+STRNADI_SEED=1 python -m experiments.strnadnet_audited_labels                  # stored as ..._s1
+tools/run_queue.sh size_strnadnet_190k frontend_pcen  # several experiments, one at a time
+tensorboard --logdir $STRNADI_WS/runs                 # curves, confusion matrices, explanations
+python -m tools.results_table                         # every run on the audited clips, one line each
 STRNADI_DRY_RUN=1 python -m experiments.frontend_pcen # build the model, stop before training
 
 python -m evaluation.report <run>                     # the evaluation cells for any finished run
 python -m evaluation.compare_runs <runA> <runB>       # paired recording bootstrap
+python -m evaluation.explain_model <run>              # what the model looks at + deletion test
+python -m evaluation.element_sequences <run>          # decoded song elements (CTC models)
+python -m evaluation.embedding_map <run>              # 2-D map of held-out clip embeddings
+python -m evaluation.review_sheets <run>              # spectrogram sheets of disputed labels
 evaluation/research_session/post_eval.sh <run>                         # external test sets as well
 python -m serving.export_onnx <run_dir> model.onnx    # export + parity check (backend)
 python -m serving.export_tflite model.onnx            # phone build; needs onnx2tf + TensorFlow
@@ -113,6 +122,11 @@ Code style: `uvx ruff format .` (settings in `pyproject.toml`).
 
 ## Where things stand
 
-Read `docs/REVIEW.md` first. In short: dialects are separated ~97 % correctly once a song is
-recognised as complete; almost all remaining error is complete-vs-Unfinished, a good part of it
-label noise; the experiments marked `proposed` are aimed at that.
+Read `docs/RESULTS.md`. In short: the old accuracy ceiling (~0.87) was label noise. After a
+visual audit of the disputed clip labels, a 0.9 M-parameter network trained from scratch is ~96 %
+accurate on recordings it never saw, and one with 0.19 M parameters is within a point of it; an
+independent set of expert-annotated songs gives 99 %. The shipped model, how it was chosen and
+what it looks at are documented there.
+
+Training needs one GPU with 4 GB of memory or more; a 5-fold run of the reference takes about 15
+minutes on an RTX 4060 Ti. Only one training runs at a time (`tools/run_queue.sh`).

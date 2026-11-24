@@ -1,6 +1,9 @@
 # %% [markdown]
 # # history_clip_labels_only
 #
+# *Run of the research session on the ORIGINAL clip labels, kept for the record. Its stored
+# predictions carry the run name given in `docs/RESEARCH_LOG.md`.*
+#
 # Baseline: StrnadNet (0.9 M params) on the 3,744 human-labelled clips only, recording-grouped
 # 5-fold CV.
 #

@@ -60,6 +60,9 @@ class StrnadNet(Model):
             'measurement' | 'mlp' (`layers.registry.build_head`).
         head_kw: dict of extra keyword arguments for the head ('linear' and 'factorized' take
             none).
+        element_tokens: 0, or the size of the element vocabulary (`len(losses.element_ctc.TOKENS)`,
+            blank included). The model then also returns per-frame token log-probabilities,
+            trained with the CTC loss on element sequences (`losses/element_ctc.py`).
 
     `forward` returns a dict: `logits` (B, n_classes), `emb` (B, emb_dim), `att` (B, T) frame
     weights, `frames` (B, d, T), `frame_logits` (B, T), plus whatever the chosen head adds.
@@ -83,6 +86,7 @@ class StrnadNet(Model):
         temporal='conv',
         head='linear',
         head_kw=None,
+        element_tokens=0,
     ):
         super().__init__()
 
@@ -141,6 +145,8 @@ class StrnadNet(Model):
         # --- frame series -> clip embedding
         self.pool = AttentiveStatsPool(d)
         self.frame_head = nn.Conv1d(d, 1, 1)  # per-frame song-activity logit
+        # per-frame element tokens (phrase, B, C, ...), decoded as a sequence
+        self.token_head = nn.Conv1d(d, element_tokens, 1) if element_tokens else None
         self.emb = nn.Sequential(
             nn.Linear(2 * d, emb_dim),
             nn.BatchNorm1d(emb_dim),
@@ -175,6 +181,9 @@ class StrnadNet(Model):
         outputs = self.cls(self.drop(embedding))  # dict with `logits` (B, n_classes)
         frame_logits = self.frame_head(frames).squeeze(1)  # (B, 100)
         outputs.update(emb=embedding, att=frame_weights, frames=frames, frame_logits=frame_logits)
+        if self.token_head is not None:
+            token_logits = self.token_head(frames).transpose(1, 2)  # (B, 100, n_tokens)
+            outputs['token_log_probs'] = token_logits.float().log_softmax(-1)
         return outputs
 
 

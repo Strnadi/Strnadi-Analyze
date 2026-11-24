@@ -1,7 +1,7 @@
 # %% [markdown]
 # # augment_far_field
 #
-# R3: R7 + far-field simulation (distance-scaled treble loss, reverberation, measured SNR) on 30 %
+# The re-cut-window recipe plus far-field simulation (distance-scaled treble loss, reverberation, measured SNR) on 30 %
 # of clips.
 #
 # **Question.** Robustness on passive recorders (JCU, Italy) without hurting phone recordings.

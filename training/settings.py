@@ -125,6 +125,8 @@ class TrainSettings:
     frame_loss_weight: float = 0.0
     element_loss_weight: float = 0.0
     measurement_loss_weight: float = 0.0
+    #: Weight of the CTC loss on element sequences (models built with `element_tokens`).
+    sequence_loss_weight: float = 0.0
 
     # --------------------------------------------------------------------------------- runtime
     #: 'cuda' trains on the GPU when one is available and falls back to the CPU otherwise.

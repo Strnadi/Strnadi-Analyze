@@ -1,14 +1,14 @@
 # %% [markdown]
 # # augment_species_background
 #
-# R8: other-species calls mixed into the background of 30 % of training songs, 5-20 dB below the
+# Other-species calls mixed into the background of 30 % of training songs, 5-20 dB below the
 # song ending.
 #
 # **Question.** Errors lean on context outside the song (59 % of occlusion importance vs 48 % when
 # correct), driven by other birds and second songs; teaching the model to ignore them removes
 # those errors.
 #
-# **Status:** proposed (from the research session). Not run (research backlog "R8 candidate" after
+# **Status:** proposed (from the research session). Not run (research backlog after
 # the occlusion analysis).
 #
 # **Needs.** processing/clean_noise_bank.py (-> data/noise_bank_clean.npy); data/orig_aligned.csv;

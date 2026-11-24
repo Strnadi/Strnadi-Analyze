@@ -43,6 +43,7 @@ from layers.freq_mixstyle import FreqMixStyle
 from layers.spec_augment import SpecAugment
 from losses.bag_complete import bag_complete_nll
 from losses.distill_cosine import distill_cosine
+from losses.element_ctc import element_ctc_loss
 from losses.factorized_weak import factorized_weak_loss
 from losses.fixmatch import FreeMatch
 from losses.frame_bce import frame_bce
@@ -188,7 +189,13 @@ def split_tables(settings, fold):
         return table
 
     for path in settings.extra_tables:
-        extra = usable_for_training(read_table(path))
+        extra = read_table(path)
+        if 'label_fold0' in extra:
+            # machine-labelled songs: use the labels of the teachers that never saw this fold
+            # (processing/machine_label_songs.py); the final model uses the joint label
+            column = 'label' if fold == ALL_DATA else f'label_fold{fold}'
+            extra = extra.assign(label=extra[column]).dropna(subset=['label'])
+        extra = usable_for_training(extra)
         extra = extra.assign(pool=_pool_name(path))
         train = pd.concat([train, extra], ignore_index=True)
 
@@ -644,6 +651,16 @@ class FoldTraining:
         if settings.measurement_loss_weight > 0 and 'measurements' in outputs:
             measure_loss = measurement_loss(outputs['measurements'], batch['measure'])
             loss = loss + settings.measurement_loss_weight * measure_loss
+
+        if settings.sequence_loss_weight > 0 and 'token_log_probs' in outputs:
+            # Only clips with a hard label teach the sequence. A candidate set such as
+            # `BC|Unfinished|None` would let CTC settle on the easy reading "phrase B" for every
+            # weakly labelled song, and the decoder then stops emitting terminal elements.
+            hard_targets = batch['target'] * (batch['kind'] == HARD_LABEL)[:, None]
+            sequence_loss = element_ctc_loss(
+                outputs['token_log_probs'], hard_targets, batch['w'].float()
+            )
+            loss = loss + settings.sequence_loss_weight * sequence_loss
 
         # --- distillation
         if self.distill_projection is not None:
