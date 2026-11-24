@@ -220,7 +220,7 @@ one window each get their own answer.
 |---|---|---|---|---|---|
 | sequence loss on all rows, weak candidate sets included | 0.955 | 0.864 | 0.892 | 0.907 | 0.968 |
 | `element_sequence_ctc`: sequence loss on hand-labelled clips only | 0.953 | 0.921 | 0.930 | 0.941 | 0.966 |
-| `element_sequence_discriminative`: classes compete | queued; see the runs table and `python -m evaluation.element_sequences element_sequence_discriminative` | | | | |
+| `element_sequence_discriminative`: classes compete | 0.956 | 0.902 | 0.918 | 0.921 | 0.968 |
 
 - The first version read most BC / BE songs as `phrase B`: a candidate set such as
   `BC|Unfinished|None` lets CTC always take the easy reading. Using only hard labels fixed it
@@ -243,7 +243,8 @@ BC / BE songs are placed correctly in nearly every example. Two weaknesses are v
   0.88 accurate against 0.957 for the head.
 
 So today the sequence is a readable second opinion and an uncertainty flag, not a replacement for
-the class head. `element_sequence_discriminative` (queued) targets exactly the under-reporting.
+the class head. Making the classes compete (`element_sequence_discriminative`) did not fix the
+under-reporting: its sequence is no better than plain CTC (0.918 against 0.930 by likelihood).
 
 **Limits of "generic".** The table fits species whose categories are an ordered sequence of a few
 discrete, nameable elements. It does not fit graded or continuous calls, large improvised
