@@ -262,7 +262,7 @@ def explanation_sheets(run, predictions, fold_models, per_class, out_dir, board)
 
 
 # ------------------------------------------------------------------------------- deletion test
-N_HIDDEN = (1, 3)  # how many patches are hidden: one (2.5 % of the picture) and three (7.5 %)
+N_HIDDEN = (1, 3)  # how many patches are hidden: one (1/160 of the picture) and three
 
 
 def hide_patches(spectrogram, patches):

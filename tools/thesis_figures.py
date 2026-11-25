@@ -454,6 +454,100 @@ def mapa_embeddingu(out):
     )
 
 
+def embed_clips(run, fold, clips, device):
+    """Embeddings (N, D) of the given clips by one fold model of a run (whether or not that model
+    held the clips out)."""
+    from config import effective_run_name
+    from training.checkpoint import load_model
+    from training.data import load_seg
+    from training.inference import peak_normalize
+
+    model = load_model(f'{WS}/runs/{effective_run_name(run)}/fold{fold}/model.pt').to(device)
+    waveforms = np.stack(
+        [
+            load_seg(clip.npy, labelled_window(clip), labelled_window(clip) + 4.0, 4 * SR)
+            for clip in clips.itertuples()
+        ]
+    )
+    waveforms = torch.from_numpy(peak_normalize(waveforms))
+    embeddings = []
+    with torch.no_grad():
+        for first in range(0, len(waveforms), 128):
+            embeddings.append(model(waveforms[first : first + 128].to(device))['emb'].cpu().numpy())
+    return np.concatenate(embeddings)
+
+
+def map_panel(out, name, points, labels, anchors=None, limits=None):
+    """One map: clips as dots in their class colours (the legend is Typst text)."""
+    fig, ax = plt.subplots(figsize=(THIRD, 2.0))
+    for class_name in CLASSES:
+        of_class = labels == class_name
+        ax.scatter(points[of_class, 0], points[of_class, 1], s=2.5, color=COLOURS[class_name])
+    if anchors is not None:
+        for x, y in anchors:
+            ax.plot(x, y, marker='+', color='k', ms=7, mew=1.0)
+    if limits is not None:
+        ax.set_xlim(limits[0])
+        ax.set_ylim(limits[1])
+    ax.set_xticks([])
+    ax.set_yticks([])
+    fig.tight_layout(pad=0.3)
+    save(fig, out, name)
+
+
+#: Three trainings of the combined recipe for the stability figure. The seed of a fold model is
+#: the run's seed plus the fold, so fold 1 of the first run and fold 0 of the second start from
+#: the same random weights, and fold 1 of both runs from different ones.
+STABILITY_RUNS = {
+    'first': ('final_combined', 1),
+    'other_start': ('final_combined_s1', 1),
+    'same_start': ('final_combined_s1', 0),
+}
+
+
+@figure
+def stabilita_mapy(out):
+    """Does a retrained model put the clips in the same places? The held-out clips of one fold are
+    mapped with UMAP fitted on the first training (`stabilita_prvni.svg`); the same clips embedded
+    by a training with other initial weights (`stabilita_jiny_start.svg`) and by one with the same
+    initial weights but other training data (`stabilita_stejny_start.svg`) are placed into that
+    same map. Prints the cosine between the embeddings of the same clip."""
+    import umap
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    run, fold = STABILITY_RUNS['first']
+    predictions = load_run_predictions(run)
+    clips = predictions[predictions.cv_fold == fold]
+    labels = np.asarray(clips.label, dtype=str)
+    embeddings = {key: embed_clips(*value, clips, device) for key, value in STABILITY_RUNS.items()}
+    reducer = umap.UMAP(n_neighbors=20, min_dist=0.1, random_state=0).fit(embeddings['first'])
+    points = {
+        'first': reducer.embedding_,
+        'other_start': reducer.transform(embeddings['other_start']),
+        'same_start': reducer.transform(embeddings['same_start']),
+    }
+    first = points['first']
+    margin_x, margin_y = np.ptp(first[:, 0]) * 0.06, np.ptp(first[:, 1]) * 0.06
+    limits = (
+        (first[:, 0].min() - margin_x, first[:, 0].max() + margin_x),
+        (first[:, 1].min() - margin_y, first[:, 1].max() + margin_y),
+    )
+    names = {'first': 'prvni', 'other_start': 'jiny_start', 'same_start': 'stejny_start'}
+    for key, panel_points in points.items():
+        map_panel(out, f'stabilita_{names[key]}', panel_points, labels, limits=limits)
+
+    def unit(vectors):
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True).clip(1e-6)
+
+    for key in ('other_start', 'same_start'):
+        cosine = (unit(embeddings['first']) * unit(embeddings[key])).sum(1)
+        print(
+            f'stability {key}: {len(labels)} clips, same-clip cosine {np.median(cosine):.2f} '
+            f'(median), {cosine.mean():.2f} (mean)',
+            file=sys.stderr,
+        )
+
+
 # ------------------------------------------------------------------------------------ training
 @figure
 def prubeh_uceni(out):
@@ -717,6 +811,467 @@ def augmentace(out):
     }
     for name, version in versions.items():
         spectrogram_panel(out, f'augmentace_{name}', version)
+
+
+@figure
+def test_odstraneni(out):
+    """The deletion test as curves (`odstraneni_krivka.svg`): the share of correctly classified
+    complete songs answered "Unfinished" after hiding the k patches most important for the
+    question "complete?", against k random patches; and by dialect at k = 3
+    (`odstraneni_nareci.svg`). The same 400 songs and the same random patches as
+    `evaluation.explain_model`, with k up to 8; the numbers go to results/deletion_curve_<run>.json."""
+    from config import DIALECTS, UNFINISHED_IDX
+    from evaluation.explain_model import (
+        hide_patches,
+        occlusion_maps,
+        patch_grid,
+        question_scores,
+    )
+
+    hidden_counts = list(range(0, 9))
+    predictions = load_run_predictions(FINAL)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    fold_models = FoldModels(FINAL, device)
+    complete = predictions[predictions.label.isin(DIALECTS) & predictions.correct]
+    complete = complete.sample(min(400, len(complete)), random_state=0)
+    rng = np.random.default_rng(0)
+    flipped = {(kind, n): [] for kind in ('top', 'random') for n in hidden_counts}
+    by_dialect = {}
+    for clip in complete.itertuples():
+        model = fold_models.get(clip.cv_fold)
+        spectrogram = clip_spectrogram(model, clip, device)
+        maps, _ = occlusion_maps(model, spectrogram)
+        patches = patch_grid(*spectrogram.shape[-2:])
+        importance = [
+            maps['complete'][first_bin, first_frame] for first_bin, first_frame in patches
+        ]
+        ranked = [patches[index] for index in np.argsort(importance)[::-1]]
+        shuffled = [patches[index] for index in rng.permutation(len(patches))]
+        variants = [(kind, n) for kind in ('top', 'random') for n in hidden_counts]
+        hidden = torch.stack(
+            [
+                hide_patches(spectrogram, (ranked if kind == 'top' else shuffled)[:n])
+                for kind, n in variants
+            ]
+        )
+        with torch.no_grad():
+            answers = question_scores(model, hidden)['probabilities'].argmax(1).cpu().numpy()
+        for variant, answer in zip(variants, answers):
+            flipped[variant].append(answer == UNFINISHED_IDX)
+        by_dialect.setdefault(clip.label, []).append(flipped[('top', 3)][-1])
+
+    curve = {
+        kind: [float(np.mean(flipped[(kind, n)])) for n in hidden_counts]
+        for kind in ('top', 'random')
+    }
+    dialect_share = {name: float(np.mean(values)) for name, values in sorted(by_dialect.items())}
+    with open(f'{WS}/results/deletion_curve_{FINAL}.json', 'w') as file:
+        json.dump(
+            {'hidden': hidden_counts, **curve, 'by_dialect_3_top': dialect_share}, file, indent=1
+        )
+
+    fig, ax = plt.subplots(figsize=(HALF, 2.2))
+    ax.plot(
+        hidden_counts,
+        curve['top'],
+        marker='o',
+        ms=3.5,
+        color='#c0392b',
+        label='nejdůležitější políčka',
+    )
+    ax.plot(
+        hidden_counts, curve['random'], marker='s', ms=3.5, color='#7f8c8d', label='náhodná políčka'
+    )
+    ax.set_xlabel('počet zakrytých políček')
+    ax.set_ylabel('podíl „nedozpívaný“')
+    ax.set_ylim(0, 1)
+    comma_ticks(ax, 'y', 1, [0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_xticks(hidden_counts)
+    ax.legend(frameon=False, loc='upper left')
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'odstraneni_krivka')
+
+    fig, ax = plt.subplots(figsize=(HALF, 2.2))
+    names = [name for name in DIALECTS if name in dialect_share]
+    ax.bar(names, [dialect_share[name] for name in names], color=[COLOURS[name] for name in names])
+    ax.set_ylim(0, 1)
+    comma_ticks(ax, 'y', 1, [0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_ylabel('podíl „nedozpívaný“')
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'odstraneni_nareci')
+    print(
+        f'deletion curve: top {np.round(curve["top"], 3)}, random {np.round(curve["random"], 3)}, by dialect {dialect_share}',
+        file=sys.stderr,
+    )
+
+
+def comma_ticks(ax, axis='y', digits=1, ticks=None):
+    """Tick labels with a decimal comma, as Czech text writes numbers."""
+    get = ax.get_yticks if axis == 'y' else ax.get_xticks
+    put = ax.set_yticks if axis == 'y' else ax.set_xticks
+    ticks = list(get()) if ticks is None else list(ticks)
+    put(ticks, [f'{tick:.{digits}f}'.replace('.', ',') for tick in ticks])
+
+
+#: The recipes of the final comparison, as the thesis names them, top to bottom.
+FINAL_SERIES = [
+    ('final_reference', 'výchozí, 0,90 M'),
+    ('final_combined', 'kombinovaný, 0,90 M'),
+    ('final_combined_430k', 'kombinovaný, 0,43 M'),
+    ('final_combined_190k', 'kombinovaný, 0,19 M'),
+    ('final_combined_170k_half_resolution', 'kombinovaný, 0,17 M, pol. rozlišení'),
+    ('final_field_ready', 'nasazený s oběma změnami, 0,90 M'),
+]
+
+
+@figure
+def recepty_semena(out):
+    """The final comparison: accuracy of the three trainings of every recipe (dots) and their mean
+    (bar): `recepty_semena.svg`."""
+    fig, ax = plt.subplots(figsize=(FULL * 0.8, 2.3))
+    for row, (run, name) in enumerate(FINAL_SERIES):
+        values = [
+            100 * load_run_predictions(f'{run}{seed}').correct.mean() for seed in ('', '_s1', '_s2')
+        ]
+        y = len(FINAL_SERIES) - 1 - row
+        ax.plot([np.mean(values)] * 2, [y - 0.28, y + 0.28], color='#333333', lw=1.6)
+        ax.scatter(
+            values, [y] * 3, s=16, color='#e2231a' if 'combined' in run else '#7f7f7f', zorder=3
+        )
+    ax.set_yticks(range(len(FINAL_SERIES)), [name for _, name in FINAL_SERIES][::-1])
+    ax.set_xlim(95.6, 97.0)
+    comma_ticks(ax, 'x', 1, np.arange(95.6, 97.01, 0.2))
+    ax.set_xlabel('přesnost (%)')
+    ax.grid(axis='x', color='#dddddd', lw=0.6)
+    ax.set_axisbelow(True)
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'recepty_semena')
+
+
+#: Clips of the span-rule figure: (file name part, class, rank among the clips with spans, by the
+#: reference model's confidence). Picked by eye from the first ten of each class.
+SPAN_RULE_EXAMPLES = [
+    ('BC', 'BC', 1),
+    ('BhBl', 'BhBl', 0),
+    ('XB', 'XB', 0),
+    ('nedozpivany', 'Unfinished', 0),
+]
+
+
+@figure
+def pravidlo_useku(out):
+    """How the element spans are built without annotation: the spectrogram as the model sees it,
+    the sustained tones the rule finds (white lines at their pitch) and the elements assigned to
+    them from the clip's label (bars above): `pravidlo_<name>.svg`."""
+    from evaluation.element_sequences import TOKEN_COLOURS
+    from losses.element_ctc import whistle_names
+    from processing.build_element_spans_from_tones import (
+        BIN_HZ,
+        FRAME_SECONDS,
+        Spectrograms,
+        element_spans,
+        labelled_window_start,
+        tone_runs,
+    )
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    spectrograms = Spectrograms(device)
+    predictions = load_run_predictions(REFERENCE)
+    bins = np.arange(len(BIN_HZ))
+    for name, label, rank in SPAN_RULE_EXAMPLES:
+        of_class = predictions[(predictions.label == label) & predictions.correct]
+        found = 0
+        for clip in of_class.sort_values(f'p_{label}', ascending=False).itertuples():
+            picture = spectrograms(clip.npy, labelled_window_start(clip))
+            spans = element_spans(picture, label)
+            if spans is None or (label == 'Unfinished' and len(spans) < 2):
+                continue
+            if found == rank:
+                break
+            found += 1
+        n_bins, n_frames = picture.shape
+        strip = 1.17
+        fig, ax = plt.subplots(figsize=(HALF, 1.75))
+        ax.imshow(
+            picture,
+            origin='lower',
+            aspect='auto',
+            extent=[0, n_frames * FRAME_SECONDS, 0, n_bins],
+            cmap='magma',
+            vmin=0,
+            vmax=2,
+        )
+        for run in tone_runs(picture):
+            first_hz, last_hz = run['hz'] - run['slope'] / 2, run['hz'] + run['slope'] / 2
+            ax.plot(
+                [run['start'], run['end']],
+                [np.interp(first_hz, BIN_HZ, bins), np.interp(last_hz, BIN_HZ, bins)],
+                color='white',
+                lw=1.0,
+            )
+        shown = whistle_names([element for element, _, _ in spans])
+        for (element, start, end), shown_name in zip(spans, shown):
+            ax.axvspan(start, end, ymin=1 / strip, ymax=1.0, color=TOKEN_COLOURS[element])
+            if end - start >= 0.12:
+                ax.text(
+                    (start + end) / 2,
+                    n_bins * (1 + strip) / 2,
+                    TOKEN_LETTER.get(shown_name, shown_name),
+                    ha='center',
+                    va='center',
+                    fontsize=7.5,
+                )
+        ax.set_ylim(0, n_bins * strip)
+        ticks = [np.interp(hz, BIN_HZ, bins) for hz in (2000, 4000, 8000)]
+        ax.set_yticks(ticks, ['2', '4', '8'])
+        ax.set_ylabel('kHz')
+        ax.set_xticks([0, 1, 2, 3, 4])
+        ax.set_xlabel('čas (s)')
+        fig.tight_layout(pad=0.4)
+        save(fig, out, f'pravidlo_{name}')
+        print(f'span rule {name}: {clip.name} {" ".join(shown)}', file=sys.stderr)
+
+
+@figure
+def spolehlivost(out):
+    """Is the model's confidence honest? Accuracy of the answers by confidence
+    (`spolehlivost_presnost.svg`) and the share of answers in every confidence band
+    (`spolehlivost_podil.svg`), for the reported model."""
+    predictions = load_run_predictions(FINAL)
+    probabilities = predictions[[f'p_{name}' for name in CLASSES]].values
+    confidence = probabilities.max(1)
+    edges = np.array([0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0001])
+    band = np.digitize(confidence, edges) - 1
+    centres = [(edges[i] + min(edges[i + 1], 1.0)) / 2 for i in range(len(edges) - 1)]
+    widths = [min(edges[i + 1], 1.0) - edges[i] for i in range(len(edges) - 1)]
+    accuracy = [
+        predictions.correct[band == i].mean() if (band == i).any() else np.nan
+        for i in range(len(centres))
+    ]
+    share = [(band == i).mean() for i in range(len(centres))]
+
+    fig, ax = plt.subplots(figsize=(HALF, 2.2))
+    ax.bar(centres, accuracy, width=[w * 0.92 for w in widths], color='#19268e', alpha=0.85)
+    ax.plot([0.3, 1.0], [0.3, 1.0], color='#7f7f7f', lw=1, ls='--')
+    ax.set_xlim(0.3, 1.0)
+    ax.set_ylim(0.3, 1.02)
+    comma_ticks(ax, 'x', 1, [0.3, 0.5, 0.7, 0.9])
+    comma_ticks(ax, 'y', 1, [0.4, 0.6, 0.8, 1.0])
+    ax.set_xlabel('jistota modelu')
+    ax.set_ylabel('podíl správných')
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'spolehlivost_presnost')
+
+    fig, ax = plt.subplots(figsize=(HALF, 2.2))
+    ax.bar(centres, share, width=[w * 0.92 for w in widths], color='#9a9a9a')
+    ax.set_xlim(0.3, 1.0)
+    comma_ticks(ax, 'x', 1, [0.3, 0.5, 0.7, 0.9])
+    ax.set_ylim(0, 1)
+    comma_ticks(ax, 'y', 1, [0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_xlabel('jistota modelu')
+    ax.set_ylabel('podíl odpovědí')
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'spolehlivost_podil')
+    print(
+        f'reliability: accuracy {np.round(accuracy, 3)}, share {np.round(share, 3)}',
+        file=sys.stderr,
+    )
+
+
+@figure
+def vyvazeni(out):
+    """Class balancing in the sampler: each class's share of the labelled clips and of the
+    examples drawn from them (chance of a clip proportional to 1 / sqrt(size of its class)):
+    `vyvazeni.svg`."""
+    labels = read_table('data/clips_audited.csv').label
+    counts = labels.value_counts()
+    order = ['BC', 'BE', 'BhBl', 'BlBh', 'XB', 'Unfinished', 'None']
+    share_clips = np.array([counts[name] for name in order], float)
+    share_clips /= share_clips.sum()
+    share_draws = np.sqrt(np.array([counts[name] for name in order], float))
+    share_draws /= share_draws.sum()
+    positions = np.arange(len(order))
+    fig, ax = plt.subplots(figsize=(FULL * 0.8, 2.2))
+    ax.bar(positions - 0.2, 100 * share_clips, 0.4, color='#9a9a9a', label='označené výřezy')
+    ax.bar(positions + 0.2, 100 * share_draws, 0.4, color='#19268e', label='losované příklady')
+    ax.set_xticks(positions, [CZECH[name] for name in order])
+    ax.set_ylabel('podíl (%)')
+    ax.legend(frameon=False)
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'vyvazeni')
+    print(
+        'balance:',
+        dict(zip(order, np.round(100 * share_clips, 1))),
+        dict(zip(order, np.round(100 * share_draws, 1))),
+        file=sys.stderr,
+    )
+
+
+#: The detector drawn in front of the classifier (trained on the songs the classifier's scan found).
+DETECTOR_RUN = 'detector_band_tcn_scan_labels'
+
+
+@figure
+def detektor_nahravka(out):
+    """The 8-thousand-parameter detector on the half minute of the voting figure: the spectrogram
+    with the annotated songs, and the detector's song probability per window with the windows it
+    passes to the classifier shaded (`detektor_nahravka.svg`)."""
+    from config import effective_run_name
+    from evaluation.whole_recording import scan_recording
+    from training.checkpoint import load_model, run_checkpoints
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    songs = read_table('data/vizina_eval.csv')
+    songs = songs[songs.split == 'test']
+    best = None
+    for npy, recording in songs.groupby('npy'):
+        for start in np.arange(0, recording.t1.max(), 4.0):
+            inside = recording[(recording.t0 >= start + 1) & (recording.t1 <= start + 31)]
+            if len(inside) >= 4 and inside.label.nunique() == 2:
+                best = (npy, start, inside)
+                break
+        if best:
+            break
+    npy, start, inside = best
+    models = [
+        load_model(path).to(device)
+        for path in run_checkpoints(f'{WS}/runs/{effective_run_name(DETECTOR_RUN)}')
+    ]
+    hop = 0.4
+    starts, probabilities, _ = scan_recording(models, npy, hop, device)
+    p_song = 1 - probabilities[:, NONE_IDX]
+    fires = p_song >= 0.5
+    passed = np.convolve(fires, np.ones(3), mode='same') > 0
+    centres = starts + 2.0
+    keep = (centres >= start) & (centres <= start + 32)
+
+    audio = read_audio(npy, start, start + 32)
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(FULL, 3.3), sharex=True, gridspec_kw={'height_ratios': [2, 1]}
+    )
+    draw_spectrogram(top, audio, '', band_khz=(2.5, 9.5))
+    top.set_title('')
+    for song in inside.itertuples():
+        top.plot(
+            [song.t0 - start, song.t1 - start],
+            [9.15, 9.15],
+            color=COLOURS[song.label],
+            lw=3,
+            solid_capstyle='butt',
+        )
+    top.set_ylabel('kHz')
+    top.set_yticks([3, 5, 7, 9])
+    for centre, is_passed in zip(centres[keep] - start, passed[keep]):
+        if is_passed:
+            bottom.axvspan(centre - hop / 2, centre + hop / 2, color='#d9e4f2', lw=0)
+    bottom.plot(centres[keep] - start, p_song[keep], color='#19268e', lw=1.2)
+    bottom.axhline(0.5, color='#7f7f7f', lw=0.8, ls='--')
+    bottom.set_ylim(0, 1.05)
+    comma_ticks(bottom, 'y', 1, [0, 0.5, 1.0])
+    bottom.set_xlim(0, 32)
+    bottom.set_xticks(np.arange(0, 33, 4))
+    bottom.set_xlabel('střed okna (s)')
+    bottom.set_ylabel('p(zpěv)')
+    bottom.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4, h_pad=1.0)
+    save(fig, out, 'detektor_nahravka')
+    print(
+        f'detector: {passed[keep].mean():.2f} of the windows passed on this stretch',
+        file=sys.stderr,
+    )
+
+
+#: Two trainings with fixed class directions (different random starts) for the fixed-map figure.
+FIXED_MAP_RUNS = ['embedding_fixed_prototypes', 'embedding_fixed_prototypes_s1']
+
+
+@figure
+def pevna_mapa(out):
+    """The fixed read-out map (`losses.fixed_prototypes.map_coordinates`) of the held-out clips of
+    fold 0 for two trainings with fixed class directions that started from different random
+    weights: `pevna_mapa_prvni.svg`, `pevna_mapa_druhe.svg`. Crosses are the class anchors."""
+    from evaluation.embedding_map import held_out_embeddings
+    from losses.fixed_prototypes import MAP_ANCHORS, map_coordinates
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    first, clips = held_out_embeddings(FIXED_MAP_RUNS[0], 0, device)
+    labels = np.asarray(clips.label, dtype=str)
+    second = embed_clips(FIXED_MAP_RUNS[1], 0, clips, device)
+    anchors = list(MAP_ANCHORS.values())
+    limits = ((-1.35, 1.35), (-1.95, 1.3))
+    map_panel(out, 'pevna_mapa_prvni', map_coordinates(first), labels, anchors, limits)
+    map_panel(out, 'pevna_mapa_druhe', map_coordinates(second), labels, anchors, limits)
+    distance = np.linalg.norm(map_coordinates(first) - map_coordinates(second), axis=1)
+    print(
+        f'fixed map: {len(labels)} clips, median distance between trainings {np.median(distance):.3f}',
+        file=sys.stderr,
+    )
+
+
+#: Clips that all 18 runs of the final comparison classify wrongly, one per group of the error
+#: table in the thesis, picked by eye from the 32 such clips: (file name part, clip).
+ERROR_EXAMPLES = [
+    ('bez_X', 'F003154.wav.1.wav'),  # phrase, pause, low B, no X; labelled Unfinished -> XB
+    ('jiny_druh', 'F001136.wav.7.wav'),  # phrase and B, then another species -> BE
+    ('tvar', 'F001115.wav.1.wav'),  # BC with a short, flat last element -> BlBh
+    ('slaby_hvizd', 'F001495.wav.10.wav'),  # BlBh with a faint second whistle -> Unfinished
+    ('utrzky', 'F001639.wav.8.wav'),  # faint tonal fragments labelled None -> Unfinished
+    ('zaver_na_zacatku', 'F001805.wav.10.wav'),  # only the end of a song at the start -> None
+]
+
+
+@figure
+def trvale_chyby(out):
+    """Clips every model of the final comparison gets wrong: `chyba_<name>.svg`, each with one
+    second of its source recording on both sides; dashed lines mark the labelled window."""
+    predictions = load_run_predictions('final_combined').set_index('name')
+    for name, clip_name in ERROR_EXAMPLES:
+        clip = predictions.loc[clip_name]
+        start = labelled_window(clip)
+        audio = read_audio(clip.npy, start - 1.0, start + 5.0)
+        spectrogram_panel(out, f'chyba_{name}', audio, marks=(1.0, 5.0), height=1.6)
+        print(f'error example {name}: {clip.label} -> {clip.predicted}', file=sys.stderr)
+
+
+#: The BC song of the noise figure, picked by eye among the 40 most confident BC clips: its
+#: ending is 10 dB quieter than its phrase, and its C element is clear in the original.
+NOISE_EXAMPLE = 'F002136.wav.23.wav'
+
+
+@figure
+def sum_k_zakonceni(out):
+    """What "signal-to-noise ratio" refers to: one BC song with the same stretch of steady
+    background noise at the lowest level each recipe uses, 0 dB measured against the loud phrase
+    ('band', the reference recipe) and 6 dB measured against the end of the song ('ending', the
+    combined recipe): `sum_puvodni.svg`, `sum_k_frazi.svg`, `sum_k_zakonceni.svg`."""
+    from augment.noise_mix import mix_noise
+
+    predictions = load_run_predictions(REFERENCE)
+    clip = predictions[predictions.name == NOISE_EXAMPLE].iloc[0]
+    start = labelled_window(clip)
+    audio = read_audio(clip.npy, start, start + 4.0)
+    noise_bank = np.load(f'{WS}/data/noise_bank_clean.npy', allow_pickle=True)
+
+    def steadiness(chunk):
+        """Spread of the frame power in dB: low for steady noise such as wind or a stream."""
+        chunk = np.asarray(chunk, np.float32)[: len(audio)]
+        frames = chunk[: len(chunk) // 640 * 640].reshape(-1, 640)
+        return float(np.std(10 * np.log10((frames**2).mean(1) + 1e-12)))
+
+    noise = np.asarray(min(noise_bank, key=steadiness), np.float32)[: len(audio)]
+    spectrogram_panel(out, 'sum_puvodni', audio, width=THIRD, height=1.6)
+    spectrogram_panel(
+        out, 'sum_k_frazi', mix_noise(audio, noise, 0.0, 'band'), width=THIRD, height=1.6
+    )
+    spectrogram_panel(
+        out, 'sum_k_zakonceni', mix_noise(audio, noise, 6.0, 'ending'), width=THIRD, height=1.6
+    )
 
 
 KONTRAFAKT_RANK = {'XB': 12, 'BC': 2}
