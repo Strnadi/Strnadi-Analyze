@@ -302,6 +302,58 @@ def decode_frame_tags(tags, min_frames=2, max_gap=2):
     return joined
 
 
+#: Where an element's boundary is put: the time its per-frame probability crosses this level,
+#: (start level, end level) for the phrase and for every terminal element. The arg-max boundary
+#: (where the element stops being the most likely tag) ends the phrase late, because the network's
+#: phrase probability decays slowly, and starts and ends the terminal whistles late and early.
+#: Chosen on half of the held-out Vizina males' annotated songs and checked on the other half
+#: (median distance from the ornithologists' times: terminal onset 0.035 -> 0.016 s, song end
+#: 0.077 -> 0.054 s, phrase end 0.056 -> 0.030 s; the phrase start, 0.20 -> 0.16 s, is limited by
+#: the spans the network learned from, not by this step).
+BOUNDARY_LEVELS = {'phrase': (0.8, 0.8), 'terminal': (0.2, 0.2)}
+
+
+def refine_boundaries(probabilities, runs, levels=BOUNDARY_LEVELS, reach=8):
+    """Move the boundaries of decoded runs to where each element's probability crosses its level.
+
+    Args:
+        probabilities: (T, n_tags) per-frame tag probabilities, in the order of FRAME_TAGS.
+        runs: [(name, first_frame, end_frame), ...] from `decode_frame_tags`.
+        levels: {'phrase': (start, end), 'terminal': (start, end)}; None keeps the arg-max edge.
+        reach: how many frames from the arg-max edge the crossing is searched for.
+
+    Returns:
+        [(name, start, end), ...] in frames, with sub-frame precision (the crossing is
+        interpolated linearly between frame centres; frame f covers [f, f + 1)). Which elements
+        were found does not change, only where they begin and end.
+    """
+    probabilities = np.asarray(probabilities, dtype=np.float64)
+    n_frames = len(probabilities)
+    refined = []
+    for name, first, end in runs:
+        curve = probabilities[:, FRAME_TAGS.index(name)]
+        start_level, end_level = levels['phrase' if name == 'phrase' else 'terminal']
+        start, finish = float(first), float(end)
+        if start_level is not None:
+            crossings = [
+                frame + 0.5 + (start_level - curve[frame]) / (curve[frame + 1] - curve[frame])
+                for frame in range(max(0, first - reach), min(n_frames - 1, first + reach))
+                if curve[frame] < start_level <= curve[frame + 1]
+            ]
+            if crossings:
+                start = min(crossings, key=lambda time: abs(time - first))
+        if end_level is not None:
+            crossings = [
+                frame + 0.5 + (curve[frame] - end_level) / (curve[frame] - curve[frame + 1])
+                for frame in range(max(0, end - reach), min(n_frames - 1, end + reach))
+                if curve[frame] >= end_level > curve[frame + 1]
+            ]
+            if crossings:
+                finish = min(crossings, key=lambda time: abs(time - end))
+        refined.append((name, start, max(start, finish)))
+    return refined
+
+
 def decode_tokens(token_log_probs, grammar=STRNADI_GRAMMAR):
     """Greedy CTC decoding: (B, T, n_tokens) -> list of token-name lists, and their frame spans.
 

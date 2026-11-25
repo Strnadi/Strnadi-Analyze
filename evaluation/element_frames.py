@@ -33,7 +33,12 @@ from config import CLASSES, SR, WS, workspace_path
 from evaluation.element_sequences import TOKEN_COLOURS
 from evaluation.explain_model import FoldModels, clip_spectrogram
 from evaluation.report import load_run_predictions
-from losses.element_ctc import STRNADI_GRAMMAR, canonical_elements, decode_frame_tags
+from losses.element_ctc import (
+    STRNADI_GRAMMAR,
+    canonical_elements,
+    decode_frame_tags,
+    refine_boundaries,
+)
 from processing.build_element_spans_from_tones import BIN_HZ
 from training.data import load_seg, read_table
 from training.inference import peak_normalize
@@ -68,13 +73,17 @@ def second_whistle_check(runs, picture):
     return None
 
 
-def runs_of(model, batch):
-    """The element runs of one window: [(name, start_s, end_s), ...]."""
-    tags = model(batch)['element_logits'][0].argmax(0).cpu().numpy()
-    return [
-        (name, first * FRAME_SECONDS, end * FRAME_SECONDS)
-        for name, first, end in decode_frame_tags(tags)
-    ]
+def runs_of(model, batch, refine=True):
+    """The element runs of one window: [(name, start_s, end_s), ...].
+
+    With `refine` the boundaries are where each element's probability crosses its level
+    (`losses.element_ctc.refine_boundaries`); without it, where the most likely tag changes.
+    """
+    probabilities = torch.softmax(model(batch)['element_logits'][0].float(), 0).T.cpu().numpy()
+    runs = decode_frame_tags(probabilities.argmax(1))
+    if refine:
+        runs = refine_boundaries(probabilities, runs)
+    return [(name, first * FRAME_SECONDS, end * FRAME_SECONDS) for name, first, end in runs]
 
 
 @torch.no_grad()

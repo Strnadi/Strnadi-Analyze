@@ -1429,16 +1429,14 @@ FRAMES_EXAMPLES = [
 def element_runs(model, spectrogram):
     """The tagged elements of one window [(name, start_s, end_s), ...] and the per-frame tag
     probabilities (frames, tags)."""
-    from losses.element_ctc import FRAME_TAGS, decode_frame_tags
+    from losses.element_ctc import FRAME_TAGS, decode_frame_tags, refine_boundaries
 
     with torch.no_grad():
         logits = model(spectrogram[None])['element_logits'][0].float()  # (tags, frames)
     probabilities = logits.softmax(0).T.cpu().numpy()
     frame_seconds = 4.0 / probabilities.shape[0]
-    runs = [
-        (name, first * frame_seconds, end * frame_seconds)
-        for name, first, end in decode_frame_tags(logits.argmax(0).cpu().numpy())
-    ]
+    runs = refine_boundaries(probabilities, decode_frame_tags(probabilities.argmax(1)))
+    runs = [(name, first * frame_seconds, end * frame_seconds) for name, first, end in runs]
     assert len(FRAME_TAGS) == probabilities.shape[1]
     return runs, probabilities
 
