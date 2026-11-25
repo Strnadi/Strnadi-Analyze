@@ -87,8 +87,16 @@ not the architecture, set the old ceiling. Results of models trained on the audi
 - **Round 3**: the 40 least confident clips labelled XB on which the model agreed: 4 show an X
   element and no B, and were relabelled Unfinished. 28 newly disputed clips were not reviewed.
 
-Totals in `label_audit/clip_label_audit.csv`: 224 relabelled, 176 confirmed, 140 unjudgeable. The
-tables in this document are those of round 1.
+- **Round 4** (2026-11-25): 28 clips newly disputed by the models trained on the audited labels:
+  3 relabelled (XB with no X element visible, to Unfinished), 18 confirmed, 7 unjudgeable.
+- **Round 5**: two relabels of rounds 2 and 3 that looked wrong on a second view were taken back
+  (the original labels stand).
+
+Totals in `label_audit/clip_label_audit.csv`: 568 clips reviewed, 225 relabelled, 196 confirmed,
+147 unjudgeable. The labelled table after all rounds has 3,597 clips (Unfinished 2,219, XB 517,
+BC 398, BE 257, BhBl 79, None 64, BlBh 63). The table as it was after round 3 is kept in the
+workspace as `data/clips_audited_round3.csv`; runs trained before round 4 are scored against the
+current labels by clip name. The tables in this document are those of round 1.
 
 ## Caveats
 
