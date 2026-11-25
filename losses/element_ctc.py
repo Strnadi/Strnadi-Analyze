@@ -263,11 +263,18 @@ def element_ctc_loss(token_log_probs, targets, weights=None, grammar=STRNADI_GRA
     return (per_example * weights).sum() / weights.sum().clamp_min(1e-6)
 
 
-def decode_frame_tags(tags, min_frames=2):
+def decode_frame_tags(tags, min_frames=2, max_gap=2):
     """Per-frame element tags (T,) -> the elements as runs: [(name, first_frame, end_frame), ...].
 
     Unlike CTC tokens, a tag is held for as long as the element sounds, so a run gives the
-    element's start and end. Background and runs shorter than `min_frames` are dropped.
+    element's start and end. Background and runs shorter than `min_frames` are dropped. Two
+    repairs then join what is one element (`max_gap=0` switches both off):
+
+    - two runs of the same name separated by at most `max_gap` frames are one element with a
+      short dropout;
+    - a `B` run that touches a `Bh` or `Bl` run is the same whistle: its plain name was given
+      before the model had heard what follows, the direct name after. The joined run keeps the
+      direct name.
     """
     tags = np.asarray(tags)
     runs, run_start = [], 0
@@ -276,7 +283,23 @@ def decode_frame_tags(tags, min_frames=2):
             if tags[run_start] != 0 and frame - run_start >= min_frames:
                 runs.append((FRAME_TAGS[tags[run_start]], run_start, frame))
             run_start = frame
-    return runs
+    if max_gap <= 0:
+        return runs
+
+    joined = []
+    for name, start, end in runs:
+        if joined and start - joined[-1][2] <= max_gap:
+            previous_name, previous_start, _ = joined[-1]
+            names = {previous_name, name}
+            if previous_name == name:
+                joined[-1] = (name, previous_start, end)
+                continue
+            if 'B' in names and names & {'Bh', 'Bl'} and start - joined[-1][2] <= 1:
+                direct_name = (names - {'B'}).pop()
+                joined[-1] = (direct_name, previous_start, end)
+                continue
+        joined.append((name, start, end))
+    return joined
 
 
 def decode_tokens(token_log_probs, grammar=STRNADI_GRAMMAR):
