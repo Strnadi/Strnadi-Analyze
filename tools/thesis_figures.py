@@ -221,6 +221,21 @@ def pravidla_oken(out):
     save(fig, out, 'pravidla_oken')
 
 
+def voting_stretch(songs, n_songs=3):
+    """The stretch of a held-out recording shown by the voting and detector figures: the first
+    32 s with at least four annotated songs, complete and unfinished, cut to its last `n_songs`
+    songs (two complete BhBl and an unfinished one), with 1 s of margin before and 1.5 s after.
+    Returns (npy, start, length in seconds, the annotated songs inside)."""
+    for npy, recording in songs.groupby('npy'):
+        for start in np.arange(0, recording.t1.max(), 4.0):
+            inside = recording[(recording.t0 >= start + 1) & (recording.t1 <= start + 31)]
+            if len(inside) >= 4 and inside.label.nunique() == 2:
+                shown = inside.sort_values('t0').iloc[-n_songs:]
+                first, last = float(shown.t0.min()) - 1.0, float(shown.t1.max()) + 1.5
+                return npy, first, last - first, shown
+    raise ValueError('no stretch with four annotated songs')
+
+
 @figure
 def hlasovani(out):
     """Attention voting on half a minute of a recording of a held-out male.
@@ -237,17 +252,7 @@ def hlasovani(out):
     songs = read_table('data/vizina_eval.csv')
     songs = songs[songs.split == 'test']
 
-    # a 32 s stretch with at least four annotated songs, complete and unfinished
-    best = None
-    for npy, recording in songs.groupby('npy'):
-        for start in np.arange(0, recording.t1.max(), 4.0):
-            inside = recording[(recording.t0 >= start + 1) & (recording.t1 <= start + 31)]
-            if len(inside) >= 4 and inside.label.nunique() == 2:
-                best = (npy, start, inside)
-                break
-        if best:
-            break
-    npy, start, inside = best
+    npy, start, length, inside = voting_stretch(songs)
 
     hop = 0.2
     starts, probabilities, attention_peak = scan_recording([model], npy, hop, device)
@@ -255,10 +260,10 @@ def hlasovani(out):
     p_song = 1 - probabilities[:, NONE_IDX]
     weights = p_song * centred_weight(attention_peak) * (p_song > 0.5)
     vote_time = starts + attention_peak
-    grid = np.arange(start, start + 32, hop)
+    grid = np.arange(start, start + length, hop)
     votes = np.array([weights[np.abs(vote_time - time) <= 0.4].sum() for time in grid])
 
-    audio = read_audio(npy, start, start + 32)
+    audio = read_audio(npy, start, start + length)
     fig, (top, bottom) = plt.subplots(
         2, 1, figsize=(FULL, 3.5), sharex=True, gridspec_kw={'height_ratios': [2, 1]}
     )
@@ -285,7 +290,7 @@ def hlasovani(out):
     top.tick_params(labelsize=8)
     bottom.fill_between(grid - start, votes, color='#7f7f7f', alpha=0.5)
     for time, class_index, _ in detections:
-        if start <= time <= start + 32:
+        if start <= time <= start + length:
             name = CLASSES[class_index]
             bottom.axvline(time - start, color=COLOURS[name], lw=1.3)
             bottom.text(
@@ -297,8 +302,8 @@ def hlasovani(out):
                 fontsize=8,
             )
     bottom.set_ylim(0, votes.max() * 1.3)
-    bottom.set_xlim(0, 32)
-    bottom.set_xticks(np.arange(0, 33, 4))
+    bottom.set_xlim(0, length)
+    bottom.set_xticks(np.arange(0, length + 0.01, 2))
     bottom.set_xlabel('čas (s)')
     bottom.set_ylabel('součet hlasů')
     bottom.spines[['top', 'right']].set_visible(False)
@@ -1119,7 +1124,7 @@ DETECTOR_RUN = 'detector_band_tcn_scan_labels'
 
 @figure
 def detektor_nahravka(out):
-    """The 8-thousand-parameter detector on the half minute of the voting figure: the spectrogram
+    """The 8-thousand-parameter detector on the stretch of the voting figure: the spectrogram
     with the annotated songs, and the detector's song probability per window with the windows it
     passes to the classifier shaded (`detektor_nahravka.svg`)."""
     from config import effective_run_name
@@ -1129,16 +1134,7 @@ def detektor_nahravka(out):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     songs = read_table('data/vizina_eval.csv')
     songs = songs[songs.split == 'test']
-    best = None
-    for npy, recording in songs.groupby('npy'):
-        for start in np.arange(0, recording.t1.max(), 4.0):
-            inside = recording[(recording.t0 >= start + 1) & (recording.t1 <= start + 31)]
-            if len(inside) >= 4 and inside.label.nunique() == 2:
-                best = (npy, start, inside)
-                break
-        if best:
-            break
-    npy, start, inside = best
+    npy, start, length, inside = voting_stretch(songs)
     models = [
         load_model(path).to(device)
         for path in run_checkpoints(f'{WS}/runs/{effective_run_name(DETECTOR_RUN)}')
@@ -1149,9 +1145,9 @@ def detektor_nahravka(out):
     fires = p_song >= 0.5
     passed = np.convolve(fires, np.ones(3), mode='same') > 0
     centres = starts + 2.0
-    keep = (centres >= start) & (centres <= start + 32)
+    keep = (centres >= start) & (centres <= start + length)
 
-    audio = read_audio(npy, start, start + 32)
+    audio = read_audio(npy, start, start + length)
     fig, (top, bottom) = plt.subplots(
         2, 1, figsize=(FULL, 3.3), sharex=True, gridspec_kw={'height_ratios': [2, 1]}
     )
@@ -1174,8 +1170,8 @@ def detektor_nahravka(out):
     bottom.axhline(0.5, color='#7f7f7f', lw=0.8, ls='--')
     bottom.set_ylim(0, 1.05)
     comma_ticks(bottom, 'y', 1, [0, 0.5, 1.0])
-    bottom.set_xlim(0, 32)
-    bottom.set_xticks(np.arange(0, 33, 4))
+    bottom.set_xlim(0, length)
+    bottom.set_xticks(np.arange(0, length + 0.01, 2))
     bottom.set_xlabel('střed okna (s)')
     bottom.set_ylabel('p(zpěv)')
     bottom.spines[['top', 'right']].set_visible(False)
