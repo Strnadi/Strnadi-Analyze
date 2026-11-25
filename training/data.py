@@ -28,7 +28,6 @@ from processing.audio_repair import background_noise, fill_zero_runs
 #: Frame targets are produced every 20 ms; the losses resample them to the model's frame rate.
 FRAME_RATE = 50
 #: Element tags, in the order used by model/element_tagger.py.
-ELEMENTS = ['bg', 'phrase', 'B', 'C', 'D', 'E', 'X']
 #: Measurement targets, in the order used by layers/measurement_head.py (table columns m_<name>).
 MEASUREMENTS = ['f1', 'f2', 'f3', 'df', 'bw', 't2', 'has_first', 'has_second']
 
@@ -237,7 +236,8 @@ class ClipDataset(torch.utils.data.Dataset):
             row.npy, window_start, window_start + settings.window_seconds, settings.window_samples
         )
         treble_cut_probability = settings.treble_cut_probability if self.train else 0.0
-        if kind == HARD_LABEL and np.random.rand() < treble_cut_probability:
+        treble_was_cut = kind == HARD_LABEL and np.random.rand() < treble_cut_probability
+        if treble_was_cut:
             # the cut can remove the song's ending: the target is then recomputed
             waveform, new_label = treble_cut_example(waveform, row['label'])
             target = np.zeros(len(CLASSES), np.float32)
@@ -256,7 +256,10 @@ class ClipDataset(torch.utils.data.Dataset):
             mask = token_frame_mask(row, window_start, settings.window_seconds)
             example['token_mask'] = torch.from_numpy(mask)
         if settings.element_loss_weight > 0:
-            example['elements'] = torch.from_numpy(self._element_tags(row, window_start))
+            tags = self._element_tags(row, window_start)
+            if treble_was_cut:
+                tags[:] = -1  # the cut may have removed elements the spans still name
+            example['elements'] = torch.from_numpy(tags)
         if settings.measurement_loss_weight > 0:
             measurements = [float(row.get(f'm_{name}', np.nan)) for name in MEASUREMENTS]
             example['measure'] = torch.tensor(measurements, dtype=torch.float32)
@@ -304,6 +307,8 @@ class ClipDataset(torch.utils.data.Dataset):
 
         Rows without an `elements` column are all -1 and ignored by the loss.
         """
+        from losses.element_ctc import FRAME_TAGS
+
         n_frames = self._n_target_frames()
         spans = row.get('elements', None)
         if not isinstance(spans, str) or not spans:
@@ -314,7 +319,7 @@ class ClipDataset(torch.utils.data.Dataset):
             first_frame = max(0, int((start_s - window_start) * FRAME_RATE))
             last_frame = int(np.ceil((end_s - window_start) * FRAME_RATE))
             last_frame = max(0, min(n_frames, last_frame))
-            tags[first_frame:last_frame] = ELEMENTS.index(name)
+            tags[first_frame:last_frame] = FRAME_TAGS.index(name)
         return tags
 
 

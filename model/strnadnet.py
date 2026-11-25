@@ -22,11 +22,13 @@ import torch.nn as nn
 from layers.attentive_stats_pool import AttentiveStatsPool
 from layers.conv_bn_act import ConvBNAct
 from layers.coord_freq import CoordFreq
+from layers.frame_tag_head import FrameTagHead
 from layers.freq_to_channels import FreqToChannels
 from layers.inverted_res_block import InvertedResBlock
 from layers.registry import build_frontend, build_head, build_temporal
 from layers.res_block import ResBlock
 from layers.tonal_line_conv import TonalLineConv
+from losses.element_ctc import FRAME_TAGS
 from model.base import Model
 
 
@@ -63,6 +65,9 @@ class StrnadNet(Model):
         element_tokens: 0, or the size of the element vocabulary (`len(losses.element_ctc.TOKENS)`,
             blank included). The model then also returns per-frame token log-probabilities,
             trained with the CTC loss on element sequences (`losses/element_ctc.py`).
+        element_frames: True adds a per-frame element tag (background, phrase, B, ...) that is held
+            for as long as the element sounds: `element_logits` (B, n_tags, T). It needs training
+            rows with element spans (`processing/build_element_spans_from_tones.py`).
 
     `forward` returns a dict: `logits` (B, n_classes), `emb` (B, emb_dim), `att` (B, T) frame
     weights, `frames` (B, d, T), `frame_logits` (B, T), plus whatever the chosen head adds.
@@ -87,6 +92,7 @@ class StrnadNet(Model):
         head='linear',
         head_kw=None,
         element_tokens=0,
+        element_frames=False,
     ):
         super().__init__()
 
@@ -147,6 +153,8 @@ class StrnadNet(Model):
         self.frame_head = nn.Conv1d(d, 1, 1)  # per-frame song-activity logit
         # per-frame element tokens (phrase, B, C, ...), decoded as a sequence
         self.token_head = nn.Conv1d(d, element_tokens, 1) if element_tokens else None
+        # per-frame element tags held for the length of the element (trained on spans)
+        self.element_head = FrameTagHead(d, len(FRAME_TAGS)) if element_frames else None
         self.emb = nn.Sequential(
             nn.Linear(2 * d, emb_dim),
             nn.BatchNorm1d(emb_dim),
@@ -184,6 +192,8 @@ class StrnadNet(Model):
         if self.token_head is not None:
             token_logits = self.token_head(frames).transpose(1, 2)  # (B, 100, n_tokens)
             outputs['token_log_probs'] = token_logits.float().log_softmax(-1)
+        if self.element_head is not None:
+            outputs['element_logits'] = self.element_head(frames)  # (B, n_tags, 100)
         return outputs
 
 

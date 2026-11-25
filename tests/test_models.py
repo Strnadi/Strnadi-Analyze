@@ -135,7 +135,7 @@ def test_other_models():
     assert out['frame_logits'].shape == (2, 200)
     assert isinstance(det.eval().detect(WAVE[0]), list)
     tag = build_model('element_tagger')(WAVE)
-    assert tag['element_logits'].shape == (2, 7, 200)
+    assert tag['element_logits'].shape == (2, 8, 200)
     mil = build_model('recording_mil')
     out = mil(
         torch.randn(3, 9, 128), torch.tensor([[1] * 9, [1] * 4 + [0] * 5, [1] + [0] * 8]).bool()
@@ -153,14 +153,15 @@ def test_other_models():
 
 
 def test_decode_elements():
-    from model.element_tagger import decode_elements
+    from model.element_tagger import ELEMENTS, decode_elements
 
-    tags = np.array([0] * 10 + [1] * 60 + [0] * 3 + [2] * 15 + [0] * 2 + [2] * 15 + [0] * 20)
-    ridge = np.r_[np.zeros(73), np.full(15, 5200.0), np.zeros(2), np.full(15, 4700.0), np.zeros(20)]
-    assert decode_elements(tags, ridge)[0] == 'BhBl' and decode_elements(tags, ridge[::-1].copy())[
-        0
-    ] in ('BhBl', 'BlBh')
-    assert decode_elements(np.array([0] * 10 + [1] * 60 + [0] * 30))[0] == ''
+    phrase, b, low = ELEMENTS.index('phrase'), ELEMENTS.index('B'), ELEMENTS.index('L')
+    tags = np.array([0] * 10 + [phrase] * 60 + [0] * 3 + [b] * 15 + [0] * 2 + [low] * 15 + [0] * 20)
+    name, runs = decode_elements(tags)
+    assert name == 'BhBl' and [run[0] for run in runs] == ['phrase', 'B', 'L']
+    assert runs[1][1:] == (73, 88)  # a run carries the element's first and end frame
+    assert decode_elements(np.array([0] * 10 + [phrase] * 60 + [0] * 30))[0] == 'Unfinished'
+    assert decode_elements(np.zeros(100, int))[0] == 'None'
 
 
 if __name__ == '__main__':

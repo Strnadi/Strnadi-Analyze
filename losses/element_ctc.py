@@ -29,6 +29,7 @@ needs only its own grammar and clip-level labels.
 
 from dataclasses import dataclass, field
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -154,6 +155,9 @@ STRNADI_GRAMMAR = ElementGrammar(
     classes=CLASSES,
 )
 TOKENS = STRNADI_GRAMMAR.tokens
+#: Per-frame element tags (`training/data.py`, `layers/frame_tag_head.py`): the same elements, with
+#: index 0 standing for "no element in this frame" instead of the CTC blank.
+FRAME_TAGS = ['bg'] + list(STRNADI_GRAMMAR.elements)
 
 
 def element_ctc_loss(token_log_probs, targets, weights=None, grammar=STRNADI_GRAMMAR):
@@ -207,6 +211,22 @@ def element_ctc_loss(token_log_probs, targets, weights=None, grammar=STRNADI_GRA
         return per_example.mean()
     weights = weights[has_target]
     return (per_example * weights).sum() / weights.sum().clamp_min(1e-6)
+
+
+def decode_frame_tags(tags, min_frames=2):
+    """Per-frame element tags (T,) -> the elements as runs: [(name, first_frame, end_frame), ...].
+
+    Unlike CTC tokens, a tag is held for as long as the element sounds, so a run gives the
+    element's start and end. Background and runs shorter than `min_frames` are dropped.
+    """
+    tags = np.asarray(tags)
+    runs, run_start = [], 0
+    for frame in range(1, len(tags) + 1):
+        if frame == len(tags) or tags[frame] != tags[run_start]:
+            if tags[run_start] != 0 and frame - run_start >= min_frames:
+                runs.append((FRAME_TAGS[tags[run_start]], run_start, frame))
+            run_start = frame
+    return runs
 
 
 def decode_tokens(token_log_probs, grammar=STRNADI_GRAMMAR):

@@ -1,5 +1,5 @@
 """Element-sequence model: label every 20 ms frame as background / first-phrase syllable / B / C / D
-/ E / X (Hansen's element names), the TweetyNet / DAS formulation of birdsong annotation, and read
+/ E / L / H / X (the element names of `losses/element_ctc.py`), the TweetyNet / DAS formulation of birdsong annotation, and read
 the dialect off the sequence of terminal elements.
 
 Why this formulation:
@@ -30,10 +30,11 @@ from layers.freq_to_channels import FreqToChannels
 from layers.registry import build_frontend, build_head
 from layers.res_block import ResBlock
 from layers.temporal_bigru import TemporalBiGRU
+from losses.element_ctc import FRAME_TAGS, STRNADI_GRAMMAR, decode_frame_tags
 from model.base import Model
 
 # element index -> name; index 0 is background, index 1 the first-phrase syllables
-ELEMENTS = ['bg', 'phrase', 'B', 'C', 'D', 'E', 'X']
+ELEMENTS = FRAME_TAGS
 
 
 class ElementTagger(Model):
@@ -141,52 +142,20 @@ class ElementTagger(Model):
         return outputs
 
 
-def decode_elements(tags, ridge_hz=None, min_frames=3):
-    """Turn per-frame element indices into a dialect string.
+def decode_elements(tags, min_frames=3):
+    """Turn per-frame element indices into a class of the project.
 
     Args:
         tags: (T,) int array of per-frame element indices (positions in `ELEMENTS`).
-        ridge_hz: optional (T,) dominant frequency per frame; needed to order two B elements.
         min_frames: runs shorter than this many frames are dropped.
 
-    Returns (dialect_string, [(element, start_frame, end_frame), ...]).
-    The dialect string is the terminal elements after the last phrase run, e.g. 'BC', 'XB', 'BhBl',
-    'B' (one element only = unfinished by the project's rule), '' (no terminal element).
+    Returns (class_name, [(element, start_frame, end_frame), ...]): the class the sequence of
+    elements stands for (`losses.element_ctc.ElementGrammar`), e.g. 'BhBl' for phrase, B, L and
+    'Unfinished' for a phrase with one terminal element or none, and the runs themselves, which
+    give every element's start and end.
     """
-    tags = np.asarray(tags)
-
-    # --- split the frame sequence into runs of one element; drop background and too-short runs
-    runs = []
-    run_start = 0
-    for frame in range(1, len(tags) + 1):
-        run_ends_here = frame == len(tags) or tags[frame] != tags[run_start]
-        if run_ends_here:
-            is_background = tags[run_start] == 0
-            run_length = frame - run_start
-            if not is_background and run_length >= min_frames:
-                element = ELEMENTS[tags[run_start]]
-                runs.append((element, run_start, frame))
-            run_start = frame
-
-    # --- the terminal elements are the runs after the last first-phrase run
-    last_phrase = -1
-    for run_index, run in enumerate(runs):
-        if run[0] == 'phrase':
-            last_phrase = run_index
-    terminal_runs = runs[last_phrase + 1 :]
-    names = [element for element, _, _ in terminal_runs]
-
-    # --- two B elements: the higher one is Bh, the lower one Bl
-    if names == ['B', 'B'] and ridge_hz is not None:
-        ridge_medians = []
-        for _, start_frame, end_frame in terminal_runs:
-            ridge_medians.append(float(np.median(ridge_hz[start_frame:end_frame])))
-        if ridge_medians[0] > ridge_medians[1]:
-            names = ['Bh', 'Bl']
-        else:
-            names = ['Bl', 'Bh']
-
-    return ''.join(names), runs
+    runs = decode_frame_tags(tags, min_frames)
+    return STRNADI_GRAMMAR.class_of_sequence([name for name, _, _ in runs]), runs
 
 
 # %% Quick look: build the model and show what it returns for 4 s of audio
