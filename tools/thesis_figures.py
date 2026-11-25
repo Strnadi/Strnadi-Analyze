@@ -392,7 +392,8 @@ def okluze(out):
 @figure
 def mapa_embeddingu(out):
     """UMAP of held-out clip embeddings: `mapa_oznaceni.svg` coloured by label, `mapa_shluky.svg`
-    by the clusters HDBSCAN finds without labels."""
+    by the clusters HDBSCAN finds without labels. The class colours are those of `COLOURS`; the
+    thesis prints the legend as text (`legenda-trid` in kapitoly/ml-schemata.typ)."""
     import umap
     from sklearn.cluster import HDBSCAN
 
@@ -420,9 +421,7 @@ def mapa_embeddingu(out):
                 points[of_class, 1],
                 s=4,
                 color=COLOURS[name],
-                label=f'{CZECH[name]} ({int(of_class.sum())})',
             )
-        ax.legend(markerscale=2, frameon=False, fontsize=7.5, handletextpad=0.2)
 
     def by_cluster(ax):
         ax.scatter(points[:, 0], points[:, 1], s=4, c=clusters, cmap='tab10')
@@ -431,6 +430,27 @@ def mapa_embeddingu(out):
     panel('mapa_shluky', by_cluster)
     print(
         f'embedding map: {len(points)} clips, {len(set(clusters) - {-1})} clusters', file=sys.stderr
+    )
+
+    # The same clips in the embedding of a frozen bird-species model (Perch, averaged over time):
+    # `mapa_perch_oznaceni.svg`, `mapa_perch_shluky.svg`.
+    index = read_table('data/orig_index.csv')
+    row_of = {name: row for row, name in enumerate(np.asarray(index.name, dtype=str))}
+    perch = np.load(f'{WS}/emb/orig_perch.npz')['emb'].astype(np.float32)
+    perch = perch[[row_of[name] for name in np.asarray(clips.name, dtype=str)]]
+    points = umap.UMAP(n_neighbors=20, min_dist=0.1, random_state=0).fit_transform(perch)
+    clusters = HDBSCAN(min_cluster_size=12).fit_predict(points)
+    panel('mapa_perch_oznaceni', by_label)
+    panel('mapa_perch_shluky', by_cluster)
+    in_cluster = clusters >= 0
+    purity = sum(
+        pd.Series(labels[clusters == cluster]).value_counts().iloc[0]
+        for cluster in set(clusters[in_cluster])
+    ) / max(int(in_cluster.sum()), 1)
+    print(
+        f'Perch map: {len(set(clusters) - {-1})} clusters, {in_cluster.mean():.2f} of clips in '
+        f'one, purity {purity:.2f}',
+        file=sys.stderr,
     )
 
 
