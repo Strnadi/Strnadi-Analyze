@@ -32,6 +32,11 @@ from training.inference import peak_normalize
 FRAME_SECONDS = 0.04  # the token head has one frame per 40 ms
 
 
+def is_true(value):
+    """A table flag as a bool, whether the table was read with booleans or with strings."""
+    return value is True or str(value) == 'True'
+
+
 @torch.no_grad()
 def element_timing(run, device):
     models = [
@@ -57,11 +62,12 @@ def element_timing(run, device):
         tokens = [(name, (first + last + 1) / 2 * FRAME_SECONDS) for name, first, last in spans]
         terminals = [time for name, time in tokens if name != 'phrase']
         phrases = [time for name, time in tokens if name == 'phrase']
-        n_annotated = int(song.has_d1 == 'True') + int(song.has_d2 == 'True')
+        n_annotated = int(is_true(song.has_d1)) + int(is_true(song.has_d2))
         structure_right.append(len(terminals) == n_annotated)
 
         song_start = song.t0 - window_start
-        terminal_start = float(song.term_t0) - window_start if song.term_t0 != '' else np.nan
+        has_terminal_time = song.term_t0 != '' and np.isfinite(float(song.term_t0))
+        terminal_start = float(song.term_t0) - window_start if has_terminal_time else np.nan
         phrase_found.append(bool(phrases))
         if phrases and np.isfinite(terminal_start):
             phrase_inside.append(song_start - 0.1 <= phrases[0] <= terminal_start + 0.1)
