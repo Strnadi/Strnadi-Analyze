@@ -149,6 +149,10 @@ class TrainSettings:
     measurement_loss_weight: float = 0.0
     #: Weight of the CTC loss on element sequences (models built with `element_tokens`).
     sequence_loss_weight: float = 0.0
+    #: The element table of the CTC loss: 'relative' (the second whistle of BhBl / BlBh is `L` or
+    #: `H`, lower or higher than the `B` before) or 'direct' (the whistles are `Bh` and `Bl`);
+    #: `losses.element_ctc.GRAMMARS`.
+    element_grammar: str = 'relative'
     #: Weight of the anchoring loss: where a row carries expert element timing, tokens are only
     #: allowed inside their element's span (`training.data.token_frame_mask`).
     sequence_anchor_weight: float = 0.0

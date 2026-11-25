@@ -28,7 +28,7 @@ import torch
 from config import CLASSES, WS, effective_run_name
 from evaluation.explain_model import FoldModels, clip_spectrogram, frequency_ticks
 from evaluation.report import load_run_predictions
-from losses.element_ctc import class_log_likelihoods, class_of_sequence, decode_tokens
+from losses.element_ctc import GRAMMARS, class_log_likelihoods, class_of_sequence, decode_tokens
 
 TOKEN_COLOURS = {
     'phrase': '#bdc3c7',
@@ -38,26 +38,36 @@ TOKEN_COLOURS = {
     'L': '#3498db',
     'H': '#9b59b6',
     'X': '#e74c3c',
+    # the two whistles under their direct names: the colours of the lower / higher whistle
+    'Bl': '#3498db',
+    'Bh': '#9b59b6',
 }
 
 
+def grammar_of(run):
+    """The element table a run was trained with (`TrainSettings.element_grammar`)."""
+    with open(f'{WS}/runs/{effective_run_name(run)}/settings.json') as file:
+        return GRAMMARS[json.load(file).get('element_grammar', 'relative')]
+
+
 @torch.no_grad()
-def decode_held_out(predictions, fold_models):
+def decode_held_out(predictions, fold_models, grammar=GRAMMARS['relative']):
     """Decode every held-out clip; returns the table with `tokens`, `spans`, `sequence_class`."""
     sequences, spans, likelihood_classes = [], [], []
     for clip in predictions.itertuples():
         model = fold_models.get(clip.cv_fold)
         spectrogram = clip_spectrogram(model, clip, fold_models.device)
         token_log_probs = model(spectrogram[None])['token_log_probs']
-        likelihood_classes.append(CLASSES[int(class_log_likelihoods(token_log_probs).argmax())])
-        clip_sequences, clip_spans = decode_tokens(token_log_probs)
+        class_scores = class_log_likelihoods(token_log_probs, grammar)
+        likelihood_classes.append(CLASSES[int(class_scores.argmax())])
+        clip_sequences, clip_spans = decode_tokens(token_log_probs, grammar)
         sequences.append(clip_sequences[0])
         spans.append(clip_spans[0])
 
     decoded = predictions.copy()
     decoded['tokens'] = [' '.join(sequence) for sequence in sequences]
     decoded['spans'] = spans
-    decoded['sequence_class'] = [class_of_sequence(sequence) for sequence in sequences]
+    decoded['sequence_class'] = [class_of_sequence(sequence, grammar) for sequence in sequences]
     decoded['likelihood_class'] = likelihood_classes
     return decoded
 
@@ -147,7 +157,9 @@ def main():
     run = effective_run_name(arguments.run)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     fold_models = FoldModels(arguments.run, device)
-    decoded = decode_held_out(load_run_predictions(arguments.run), fold_models)
+    decoded = decode_held_out(
+        load_run_predictions(arguments.run), fold_models, grammar_of(arguments.run)
+    )
 
     result = summarize(decoded)
     print(json.dumps(result, indent=1))

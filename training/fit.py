@@ -43,7 +43,7 @@ from layers.freq_mixstyle import FreqMixStyle
 from layers.spec_augment import SpecAugment
 from losses.bag_complete import bag_complete_nll
 from losses.distill_cosine import distill_cosine
-from losses.element_ctc import class_log_likelihoods, element_ctc_loss
+from losses.element_ctc import GRAMMARS, class_log_likelihoods, element_ctc_loss
 from losses.factorized_weak import factorized_weak_loss
 from losses.fixmatch import FreeMatch
 from losses.generalized_cross_entropy import generalized_cross_entropy
@@ -681,7 +681,10 @@ class FoldTraining:
             # weakly labelled song, and the decoder then stops emitting terminal elements.
             hard_targets = batch['target'] * (batch['kind'] == HARD_LABEL)[:, None]
             sequence_loss = element_ctc_loss(
-                outputs['token_log_probs'], hard_targets, batch['w'].float()
+                outputs['token_log_probs'],
+                hard_targets,
+                batch['w'].float(),
+                GRAMMARS[settings.element_grammar],
             )
             loss = loss + settings.sequence_loss_weight * sequence_loss
 
@@ -696,7 +699,9 @@ class FoldTraining:
             # the labelled sequence; here "phrase B C" must also beat "phrase B".
             is_hard = batch['kind'] == HARD_LABEL
             if is_hard.any():
-                class_scores = class_log_likelihoods(outputs['token_log_probs'][is_hard])
+                class_scores = class_log_likelihoods(
+                    outputs['token_log_probs'][is_hard], GRAMMARS[settings.element_grammar]
+                )
                 true_class = batch['target'][is_hard].argmax(1)
                 sequence_class_loss = nn.functional.nll_loss(class_scores, true_class)
                 loss = loss + settings.sequence_class_loss_weight * sequence_class_loss

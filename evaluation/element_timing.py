@@ -24,6 +24,7 @@ import numpy as np
 import torch
 
 from config import SR, WS, effective_run_name
+from evaluation.element_sequences import grammar_of
 from losses.element_ctc import decode_tokens
 from training.checkpoint import load_model, run_checkpoints
 from training.data import load_seg, read_table
@@ -45,6 +46,7 @@ def element_timing(run, device):
     ]
     songs = read_table('data/vizina_eval.csv')
     songs = songs[songs.split == 'test']
+    grammar = grammar_of(run)
 
     structure_right, phrase_found, phrase_inside, onset_errors = [], [], [], []
     # Every fold model decodes every song on its own: token posteriors are single-frame spikes,
@@ -55,7 +57,7 @@ def element_timing(run, device):
             load_seg(song.npy, window_start, window_start + 4.0, 4 * SR)[None]
         )
         batch = torch.from_numpy(waveform).to(device)
-        _, spans = decode_tokens(model(batch)['token_log_probs'])
+        _, spans = decode_tokens(model(batch)['token_log_probs'], grammar)
         spans = spans[0]
 
         # times are relative to the window; a token's time is the middle of its frames

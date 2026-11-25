@@ -154,6 +154,21 @@ STRNADI_GRAMMAR = ElementGrammar(
     },
     classes=CLASSES,
 )
+#: The same table with the two whistles of BhBl / BlBh under their direct names. `Bh` and `Bl`
+#: take the places of `H` and `L` in the vocabulary, so a model has the same outputs either way.
+STRNADI_GRAMMAR_DIRECT = ElementGrammar(
+    elements=['phrase', 'B', 'C', 'E', 'Bl', 'Bh', 'X'],
+    dialects={
+        'BC': ['B', 'C'],
+        'BE': ['B', 'E'],
+        'BhBl': ['Bh', 'Bl'],
+        'BlBh': ['Bl', 'Bh'],
+        'XB': ['X', 'B'],
+    },
+    classes=CLASSES,
+)
+#: `TrainSettings.element_grammar` -> the table.
+GRAMMARS = {'relative': STRNADI_GRAMMAR, 'direct': STRNADI_GRAMMAR_DIRECT}
 TOKENS = STRNADI_GRAMMAR.tokens
 #: Per-frame element tags (`training/data.py`, `layers/frame_tag_head.py`): the same elements, with
 #: index 0 standing for "no element in this frame" instead of the CTC blank.
@@ -161,6 +176,20 @@ TOKENS = STRNADI_GRAMMAR.tokens
 #: other one); a model may be trained with them instead of `B` followed by `L` / `H`
 #: (`canonical_elements` translates).
 FRAME_TAGS = ['bg'] + list(STRNADI_GRAMMAR.elements) + ['Bh', 'Bl']
+
+
+def whistle_names(names):
+    """Element names as an ornithologist writes them: `B L` -> `Bh Bl`, `B H` -> `Bl Bh`.
+
+    The inverse of `canonical_elements`, for showing a decoded sequence. A `B` that is not
+    followed by a second whistle stays `B`.
+    """
+    shown = list(names)
+    for index in range(len(shown) - 1):
+        if shown[index] == 'B' and shown[index + 1] in ('L', 'H'):
+            lower_second = shown[index + 1] == 'L'
+            shown[index], shown[index + 1] = ('Bh', 'Bl') if lower_second else ('Bl', 'Bh')
+    return shown
 
 
 def canonical_elements(names):
