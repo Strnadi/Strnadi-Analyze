@@ -30,7 +30,12 @@ from layers.freq_to_channels import FreqToChannels
 from layers.registry import build_frontend, build_head
 from layers.res_block import ResBlock
 from layers.temporal_bigru import TemporalBiGRU
-from losses.element_ctc import FRAME_TAGS, STRNADI_GRAMMAR, decode_frame_tags
+from losses.element_ctc import (
+    FRAME_TAGS,
+    STRNADI_GRAMMAR,
+    canonical_elements,
+    decode_frame_tags,
+)
 from model.base import Model
 
 # element index -> name; index 0 is background, index 1 the first-phrase syllables
@@ -155,7 +160,8 @@ def decode_elements(tags, min_frames=3):
     give every element's start and end.
     """
     runs = decode_frame_tags(tags, min_frames)
-    return STRNADI_GRAMMAR.class_of_sequence([name for name, _, _ in runs]), runs
+    names = canonical_elements([name for name, _, _ in runs])
+    return STRNADI_GRAMMAR.class_of_sequence(names), runs
 
 
 # %% Quick look: build the model and show what it returns for 4 s of audio

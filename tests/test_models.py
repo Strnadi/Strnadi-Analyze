@@ -135,7 +135,7 @@ def test_other_models():
     assert out['frame_logits'].shape == (2, 200)
     assert isinstance(det.eval().detect(WAVE[0]), list)
     tag = build_model('element_tagger')(WAVE)
-    assert tag['element_logits'].shape == (2, 8, 200)
+    assert tag['element_logits'].shape == (2, 10, 200)
     mil = build_model('recording_mil')
     out = mil(
         torch.randn(3, 9, 128), torch.tensor([[1] * 9, [1] * 4 + [0] * 5, [1] + [0] * 8]).bool()
@@ -162,6 +162,12 @@ def test_decode_elements():
     assert runs[1][1:] == (73, 88)  # a run carries the element's first and end frame
     assert decode_elements(np.array([0] * 10 + [phrase] * 60 + [0] * 30))[0] == 'Unfinished'
     assert decode_elements(np.zeros(100, int))[0] == 'None'
+    # the two whistles under their direct names read the same
+    high, lower = ELEMENTS.index('Bh'), ELEMENTS.index('Bl')
+    direct = np.array([0] * 10 + [phrase] * 60 + [high] * 15 + [lower] * 15)
+    assert (
+        decode_elements(direct)[0] == 'BhBl' and decode_elements(direct[::-1].copy())[0] != 'BhBl'
+    )
 
 
 if __name__ == '__main__':

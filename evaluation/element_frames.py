@@ -33,7 +33,7 @@ from config import CLASSES, SR, WS, workspace_path
 from evaluation.element_sequences import TOKEN_COLOURS
 from evaluation.explain_model import FoldModels, clip_spectrogram
 from evaluation.report import load_run_predictions
-from losses.element_ctc import STRNADI_GRAMMAR, decode_frame_tags
+from losses.element_ctc import STRNADI_GRAMMAR, canonical_elements, decode_frame_tags
 from processing.build_element_spans_from_tones import BIN_HZ
 from training.data import load_seg, read_table
 from training.inference import peak_normalize
@@ -52,18 +52,19 @@ def measured_pitch(picture, start, end):
 
 
 def second_whistle_check(runs, picture):
-    """For a `B` followed by `L` or `H`: the measured pitch step (second minus first, Hz), and
+    """For a `B` followed by `L` or `H` (or the pair tagged directly `Bh Bl` / `Bl Bh`): the measured pitch step (second minus first, Hz), and
     whether the tag says the same direction. None when the window has no such pair.
 
     The tag L / H is the model's judgement of "lower / higher than the B before"; with spans the
     step can be measured on the spectrogram, which does not depend on that judgement.
     """
-    for (name, start, end), (next_name, next_start, next_end) in zip(runs, runs[1:]):
-        if name == 'B' and next_name in ('L', 'H'):
-            step = measured_pitch(picture, next_start, next_end) - measured_pitch(
-                picture, start, end
-            )
-            return step, (step < 0) == (next_name == 'L')
+    names = canonical_elements([name for name, _, _ in runs])
+    for index in range(len(runs) - 1):
+        if names[index] == 'B' and names[index + 1] in ('L', 'H'):
+            (_, start, end), (_, next_start, next_end) = runs[index], runs[index + 1]
+            first_pitch = measured_pitch(picture, start, end)
+            step = measured_pitch(picture, next_start, next_end) - first_pitch
+            return step, (step < 0) == (names[index + 1] == 'L')
     return None
 
 
@@ -85,7 +86,8 @@ def on_held_out_clips(predictions, fold_models):
         spectrogram = clip_spectrogram(model, clip, fold_models.device)
         runs = runs_of(model, spectrogram[None])
         all_runs.append(runs)
-        from_runs = STRNADI_GRAMMAR.class_of_sequence([name for name, _, _ in runs])
+        names = canonical_elements([name for name, _, _ in runs])
+        from_runs = STRNADI_GRAMMAR.class_of_sequence(names)
         sequence_class.append(from_runs)
         check = second_whistle_check(runs, spectrogram[0].cpu().numpy())
         if check is not None and clip.label in ('BhBl', 'BlBh'):
@@ -192,7 +194,8 @@ def draw_sheet(decoded, fold_models, path, per_class=4):
         )
         ax.set_ylim(0, n_bins * 1.15)
         for name, start, end in clip.runs:
-            ax.axvspan(start, end, ymin=1 / 1.15, ymax=1.0, color=TOKEN_COLOURS[name])
+            colour = TOKEN_COLOURS[{'Bh': 'H', 'Bl': 'L'}.get(name, name)]
+            ax.axvspan(start, end, ymin=1 / 1.15, ymax=1.0, color=colour)
             ax.text(
                 (start + end) / 2,
                 n_bins * 1.075,

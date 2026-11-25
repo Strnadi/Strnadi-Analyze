@@ -157,7 +157,28 @@ STRNADI_GRAMMAR = ElementGrammar(
 TOKENS = STRNADI_GRAMMAR.tokens
 #: Per-frame element tags (`training/data.py`, `layers/frame_tag_head.py`): the same elements, with
 #: index 0 standing for "no element in this frame" instead of the CTC blank.
-FRAME_TAGS = ['bg'] + list(STRNADI_GRAMMAR.elements)
+#: `Bh` / `Bl` are the direct names of the two whistles of BhBl and BlBh (higher / lower than the
+#: other one); a model may be trained with them instead of `B` followed by `L` / `H`
+#: (`canonical_elements` translates).
+FRAME_TAGS = ['bg'] + list(STRNADI_GRAMMAR.elements) + ['Bh', 'Bl']
+
+
+def canonical_elements(names):
+    """Element names with the direct whistle names rewritten for the grammar.
+
+    `Bh Bl` -> `B L` and `Bl Bh` -> `B H` (a pair of whistles: the second is lower / higher than
+    the first); a `Bh` or `Bl` that is not the second of such a pair -> `B`.
+    """
+    canonical = []
+    for index, name in enumerate(names):
+        previous = names[index - 1] if index else None
+        if name == 'Bl' and previous == 'Bh':
+            canonical.append('L')
+        elif name == 'Bh' and previous == 'Bl':
+            canonical.append('H')
+        else:
+            canonical.append('B' if name in ('Bh', 'Bl') else name)
+    return canonical
 
 
 def element_ctc_loss(token_log_probs, targets, weights=None, grammar=STRNADI_GRAMMAR):

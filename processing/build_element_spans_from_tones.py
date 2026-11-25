@@ -21,7 +21,9 @@ the phrase: a sustained tone in the B band right after the phrase is taken as B.
 
 Output: one row per clip with spans, in the format of an extra training table, with the column
 `elements`: JSON `[[name, start_s, end_s], ...]` in seconds of the audio file, element names as in
-`losses/element_ctc.py` (phrase, B, C, E, L, H, X). Nothing existing is modified.
+`losses/element_ctc.py` (phrase, B, C, E, L, H, X). With `--direct-whistle-names` the two whistles
+of BhBl and BlBh are written `Bh` and `Bl` instead of `B` followed by `L` (lower) or `H` (higher).
+Nothing existing is modified.
 
 Checked against the ornithologists' times on the 663 held-out focal songs (`--check`): the start
 of the first terminal element and the end of the song.
@@ -270,7 +272,11 @@ def labelled_window_start(clip):
     return float(clip.t0) + max((float(clip.t1) - float(clip.t0)) - 4.0, 0) / 2
 
 
-def build_table(spectrograms):
+#: The two whistles of BhBl / BlBh under their direct names, instead of `B` then `L` / `H`.
+DIRECT_WHISTLE_NAMES = {'BhBl': {'B': 'Bh', 'L': 'Bl'}, 'BlBh': {'B': 'Bl', 'H': 'Bh'}}
+
+
+def build_table(spectrograms, direct_whistle_names=False):
     """Spans for every hand-labelled clip: the rows with spans, and the share found per class."""
     clips = read_table('data/clips_audited.csv')
     rows = []
@@ -282,8 +288,10 @@ def build_table(spectrograms):
         if spans is None:
             continue
         found[clip.label][0] += 1
+        rename = DIRECT_WHISTLE_NAMES.get(clip.label, {}) if direct_whistle_names else {}
         elements = [
-            [name, round(start + first, 3), round(start + last, 3)] for name, first, last in spans
+            [rename.get(name, name), round(start + first, 3), round(start + last, 3)]
+            for name, first, last in spans
         ]
         rows.append(
             {
@@ -370,9 +378,8 @@ def draw_sheet(table, spectrograms, path, per_class=6):
         )
         ax.set_ylim(0, N_BINS * 1.15)
         for name, first, last in json.loads(row.elements):
-            ax.axvspan(
-                first - start, last - start, ymin=1 / 1.15, ymax=1.0, color=TOKEN_COLOURS[name]
-            )
+            colour = TOKEN_COLOURS[{'Bh': 'H', 'Bl': 'L'}.get(name, name)]
+            ax.axvspan(first - start, last - start, ymin=1 / 1.15, ymax=1.0, color=colour)
             ax.text(
                 (first + last) / 2 - start,
                 N_BINS * 1.075,
@@ -393,6 +400,11 @@ def main():
     parser.add_argument('--out', default='data/element_spans_from_tones.csv')
     parser.add_argument('--sheet', default='figs/element_spans_from_tones.png')
     parser.add_argument('--check', action='store_true', help='only compare with the expert times')
+    parser.add_argument(
+        '--direct-whistle-names',
+        action='store_true',
+        help='name the two whistles of BhBl / BlBh Bh and Bl instead of B and L / H',
+    )
     arguments = parser.parse_args()
 
     spectrograms = Spectrograms('cuda' if torch.cuda.is_available() else 'cpu')
@@ -400,7 +412,7 @@ def main():
     if arguments.check:
         return
 
-    table, found = build_table(spectrograms)
+    table, found = build_table(spectrograms, arguments.direct_whistle_names)
     table.to_csv(workspace_path(arguments.out), index=False)
     print(f'\n{len(table)} clips with spans -> {arguments.out}')
     for name, (n_found, n_all) in found.items():
