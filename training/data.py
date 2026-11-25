@@ -262,6 +262,9 @@ class ClipDataset(torch.utils.data.Dataset):
             example['elements'] = torch.from_numpy(tags)
         if settings.measurement_loss_weight > 0:
             measurements = [float(row.get(f'm_{name}', np.nan)) for name in MEASUREMENTS]
+            if treble_was_cut:
+                # the cut may have removed the element the values describe
+                measurements = [np.nan] * len(MEASUREMENTS)
             example['measure'] = torch.tensor(measurements, dtype=torch.float32)
 
         if self.teacher_store is not None:

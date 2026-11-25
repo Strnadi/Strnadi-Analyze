@@ -8,8 +8,7 @@
 # correct supervision, and a learned aggregator beats averaging per-song probabilities (bird-level
 # accuracy is already 0.957 at 0.89 coverage by simple averaging).
 #
-# **Status:** proposed (from review proposal). Not run. Listed in the research backlog as
-# "attention-MIL" / "bout-level set transformer", never built.
+# **Status:** queued (2026-11-25) on the song embeddings of `final_combined`.
 #
 # **Needs.** out-of-fold song embeddings of a finished run: evaluation/research_session/embed_songs.py <run> (->
 # results/song_emb_<run>.npz)
@@ -24,7 +23,7 @@ from training.bird_level import fit_bird_level
 
 # %% Settings
 RUN = 'recording_mil'
-SONG_RUN = 'strnadnet_audited_labels'  # the run whose out-of-fold song embeddings are used
+SONG_RUN = 'final_combined'  # the run whose out-of-fold song embeddings are used
 
 
 # %% Model
@@ -35,4 +34,5 @@ def make_model(embedding_dim):
 # %% Train and evaluate (out of fold over recordings)
 # Prints the bag model's bird-level accuracy next to the baseline it has to beat:
 # the mean dialect probability over the songs the song model calls complete.
-fit_bird_level(RUN, make_model, song_run=SONG_RUN, epochs=30)
+if __name__ == '__main__':
+    fit_bird_level(RUN, make_model, song_run=SONG_RUN, epochs=30)

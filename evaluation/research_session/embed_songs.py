@@ -1,7 +1,9 @@
 """Out-of-fold embeddings and class probabilities for every detected song of every NCS recording, grouped by
 recording: the input of the bird-level model (training/bird_level.py) and of bird-level aggregation.
 
-Each song is scored by the fold model that never saw its recording (folds from the weak table). Per song: the
+Each song is scored by the fold model that never saw its recording: the fold of the recording in the
+labelled table the run was trained on (as in `training.fit.split_tables`), and the fold written in
+the weak table only for recordings without labelled clips. Per song: the
 128-d clip embedding and the 7 class probabilities (averaged over 3 onset-aligned windows).
 Writes results/song_emb_<run>.npz with arrays emb (S, D), prob (S, 7), rec (S,), fold (S,), and the
 recording-level label per song (`bag_label`: the single dialect in the song's candidate set, or '').
@@ -15,7 +17,7 @@ import numpy as np
 import torch
 from config import WS, DIALECTS
 from training.checkpoint import load_model
-from training.data import read_table
+from training.data import duplicate_recordings, read_table
 from training.inference import windows
 
 OFFS = (
@@ -29,25 +31,33 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('run')
     ap.add_argument('--table', default='data/weak_v5.csv')
+    ap.add_argument('--labelled', default='data/clips_audited.csv')
     a = ap.parse_args()
     torch.set_num_threads(int(os.environ.get('THREADS', 4)))
     W = read_table(a.table)
     W = W[(W.source == 'ncs') & W.label.str.contains('|', regex=False)].reset_index(drop=True)
+    labelled = read_table(a.labelled)
+    recording_fold = dict(zip(labelled.grp.astype(str), labelled.fold))
+    same_audio = duplicate_recordings()
+    recording = W.rec.astype(str).str.replace('ncs:', '', regex=False)
+    recording = recording.map(lambda name: same_audio.get(name, name))
+    W['fold'] = recording.map(recording_fold).fillna(W.fold).astype(int)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     emb, prob = np.zeros((len(W), 128), np.float32), np.zeros((len(W), 7), np.float32)
     for k in sorted(W.fold.unique()):
         pt = f'{WS}/runs/{a.run}/fold{int(k)}/model.pt'
         if not os.path.exists(pt):
             raise SystemExit(f'missing {pt}')
-        m = load_model(pt)
+        m = load_model(pt).to(device)
         rows = np.where(W.fold.values == k)[0]
         for i in range(0, len(rows), 64):
             sel = rows[i : i + 64]
-            X = torch.from_numpy(windows(W.iloc[sel], OFFS))
+            X = torch.from_numpy(windows(W.iloc[sel], OFFS)).to(device)
             with torch.no_grad():
                 out = m(X)
-            emb[sel] = out['emb'].view(len(sel), len(OFFS), -1).mean(1).numpy()
+            emb[sel] = out['emb'].view(len(sel), len(OFFS), -1).mean(1).cpu().numpy()
             prob[sel] = (
-                torch.softmax(out['logits'], 1).view(len(sel), len(OFFS), -1).mean(1).numpy()
+                torch.softmax(out['logits'], 1).view(len(sel), len(OFFS), -1).mean(1).cpu().numpy()
             )
         print('fold', int(k), len(rows), 'songs', flush=True)
     bag = W.label.map(
