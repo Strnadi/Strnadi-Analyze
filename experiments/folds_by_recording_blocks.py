@@ -11,6 +11,13 @@
 # recording numbers is one group (`processing/build_block_folds.py`, 520 groups for 2,037
 # recordings).
 #
+# How good is the stand-in? Archive numbers follow the order of the observations in the project's
+# database. In its export, 32 % of the observations have another observation by the same observer
+# within 300 m (most likely the same territory). With one fold per observation, 28 % of all
+# observations have such a neighbour in another fold; with blocks of 25, 9 %. The blocks do not
+# separate observers as such: five observers made 41 % of the observations and nearly every
+# observer appears in several folds either way.
+#
 # **Differs from `ablation_clip_labels_only` in:** the folds only
 # (`data/clips_audited_block_folds.csv`). Clip labels alone are used so that no extra table can
 # carry a recording across the new fold borders.

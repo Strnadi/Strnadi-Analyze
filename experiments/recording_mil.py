@@ -1,8 +1,8 @@
 # %% [markdown]
 # # recording_mil
 #
-# Bird-level model: a small transformer + gated-attention pooling over the embeddings of all songs
-# in a recording, trained on the 3,333 file-level dialect labels as bag labels.
+# Bird-level model: a small transformer + gated-attention pooling over all songs of a recording
+# (each song given as its seven class log-probabilities), trained on the 3,333 file-level dialect labels as bag labels.
 #
 # **Question.** The scientific output is one dialect per bird. As bag labels the file labels are
 # correct supervision, and a learned aggregator beats averaging per-song probabilities (bird-level

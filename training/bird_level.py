@@ -6,6 +6,14 @@ Input is `results/song_emb_<song_run>.npz` from `evaluation/research_session/emb
 class probabilities that are already out of fold (each recording's songs were embedded by the fold
 model that never saw that recording). The recording-level dialect is the bag label.
 
+The input of the bag model is by default the seven class log-probabilities of every song, not its
+embedding. Every fold model has its own embedding space (the same clip lands at unrelated places in
+two trainings), and a recording's songs are embedded by the one fold model that never saw it: a bag
+model trained on embeddings would be tested on a space it has never seen (measured: 32 % against
+93 % for plain averaging). Class probabilities mean the same in every fold. Pass
+`song_features='embedding'` only for a song run whose embedding space is fixed across trainings
+(`experiments/embedding_fixed_prototypes.py`).
+
 Reported, out of fold over recordings: accuracy of the bag model, next to the baseline it has to
 beat (mean dialect probability over the songs the song model calls complete).
 """
@@ -71,6 +79,7 @@ def fit_bird_level(
     run_name,
     make_model,
     song_run,
+    song_features='log_probability',
     epochs=30,
     max_songs=24,
     batch_size=32,
@@ -83,6 +92,8 @@ def fit_bird_level(
         run_name: output directory under `$STRNADI_WS/runs/`.
         make_model: function taking the embedding size and returning the bag model.
         song_run: the run whose song embeddings are used.
+        song_features: 'log_probability' (the seven class log-probabilities of a song) or
+            'embedding' (only for a song run with a fixed embedding space, see the module text).
         max_songs: recordings with more songs are sub-sampled to this many per batch.
     """
     if dry_run():
@@ -96,7 +107,10 @@ def fit_bird_level(
     rng = np.random.default_rng(0)
 
     song_data = np.load(f'{WS}/results/song_emb_{song_run}.npz', allow_pickle=True)
-    embeddings = song_data['emb']
+    if song_features == 'embedding':
+        embeddings = song_data['emb']
+    else:
+        embeddings = np.log(np.clip(song_data['prob'], 1e-4, 1.0)).astype(np.float32)
     bags = collect_bags(song_data)
     n_dialects = len(DIALECTS)
 
@@ -159,6 +173,7 @@ def fit_bird_level(
     result = {
         'name': run_name,
         'songs': song_run,
+        'song_features': song_features,
         'recordings': n_recordings,
         'bag_model_accuracy': n_correct / n_recordings,
         'mean_probability_accuracy': n_correct_baseline / n_recordings,
