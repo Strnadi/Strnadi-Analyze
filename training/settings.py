@@ -149,6 +149,9 @@ class TrainSettings:
     measurement_loss_weight: float = 0.0
     #: Weight of the CTC loss on element sequences (models built with `element_tokens`).
     sequence_loss_weight: float = 0.0
+    #: Weight of the loss that pulls the embedding of hand-labelled clips towards fixed class
+    #: directions, the same in every training (`losses/fixed_prototypes.py`).
+    prototype_loss_weight: float = 0.0
     #: The element table of the CTC loss: 'relative' (the second whistle of BhBl / BlBh is `L` or
     #: `H`, lower or higher than the `B` before) or 'direct' (the whistles are `Bh` and `Bl`);
     #: `losses.element_ctc.GRAMMARS`.

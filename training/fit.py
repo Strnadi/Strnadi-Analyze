@@ -48,6 +48,7 @@ from losses.factorized_weak import factorized_weak_loss
 from losses.fixmatch import FreeMatch
 from losses.generalized_cross_entropy import generalized_cross_entropy
 from losses.frame_bce import frame_bce
+from losses.fixed_prototypes import prototype_loss
 from losses.frame_ce import frame_ce
 from losses.margin import cosface_margin
 from losses.measurement import measurement_loss
@@ -663,6 +664,12 @@ class FoldTraining:
         loss = classification_loss(
             outputs, batch['target'], batch['kind'], example_weights, settings
         )
+
+        if settings.prototype_loss_weight > 0:
+            embedding_loss = prototype_loss(
+                outputs['emb'], batch['target'], batch['kind'] == HARD_LABEL
+            )
+            loss = loss + settings.prototype_loss_weight * embedding_loss
 
         # --- per-frame auxiliary targets
         if settings.frame_loss_weight > 0 and outputs.get('frame_logits') is not None:
