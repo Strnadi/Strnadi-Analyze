@@ -1197,16 +1197,16 @@ def pevna_mapa(out):
     fold 0 for two trainings with fixed class directions that started from different random
     weights: `pevna_mapa_prvni.svg`, `pevna_mapa_druhe.svg`. Crosses are the class anchors."""
     from evaluation.embedding_map import held_out_embeddings
-    from losses.fixed_prototypes import MAP_ANCHORS, map_coordinates
+    from losses.fixed_prototypes import map_coordinates
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     first, clips = held_out_embeddings(FIXED_MAP_RUNS[0], 0, device)
     labels = np.asarray(clips.label, dtype=str)
     second = embed_clips(FIXED_MAP_RUNS[1], 0, clips, device)
-    anchors = list(MAP_ANCHORS.values())
-    limits = ((-1.35, 1.35), (-1.95, 1.3))
-    map_panel(out, 'pevna_mapa_prvni', map_coordinates(first), labels, anchors, limits)
-    map_panel(out, 'pevna_mapa_druhe', map_coordinates(second), labels, anchors, limits)
+    # the clips lie well inside the anchor circle: show where they are, not the anchors
+    limits = ((-0.8, 0.8), (-1.0, 0.8))
+    map_panel(out, 'pevna_mapa_prvni', map_coordinates(first), labels, limits=limits)
+    map_panel(out, 'pevna_mapa_druhe', map_coordinates(second), labels, limits=limits)
     distance = np.linalg.norm(map_coordinates(first) - map_coordinates(second), axis=1)
     print(
         f'fixed map: {len(labels)} clips, median distance between trainings {np.median(distance):.3f}',
