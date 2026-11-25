@@ -601,7 +601,7 @@ GROUPS = {
 #: Where the label of a point goes when the default (right, above) would collide.
 LABEL_OFFSETS = {
     'size_strnadnet_430k': (-8, 7),
-    'speed_depthwise': (4, -11),
+    'speed_depthwise': (-50, -4),
     'speed_half_resolution': (6, -9),
     'temporal_gru': (-8, 7),
     'backbone_convnext_atto_imagenet': (-22, 8),
@@ -855,6 +855,132 @@ def sekvence_elementu(out):
         model = fold_models.get(clip.cv_fold)
         tokens = sequence_picture(out, f'sekvence_{name}', model, clip, device)
         print(f'sequence of {name} ({clip.name}): {" ".join(tokens)}', file=sys.stderr)
+
+
+# ------------------------------------------------------------------------ per-frame element tags
+#: The run whose per-frame element tags are drawn (`element_frames=True`, trained on spans found
+#: from label and spectrogram, `processing/build_element_spans_from_tones.py`).
+FRAMES_RUN = os.environ.get('THESIS_FRAMES_RUN', 'element_frames_from_tones')
+#: The clips shown: (file name part, class, which of the correctly classified clips whose tagged
+#: elements give the right class, by confidence). Picked by eye like SEQUENCE_EXAMPLES, as
+#: counterparts of the CTC figure: four complete songs, an unfinished song ending in B, and one
+#: that ends with the phrase alone (the case the CTC output reads as "phrase, B").
+FRAMES_EXAMPLES = [
+    ('XB', 'XB', 1),
+    ('BC', 'BC', 6),
+    ('BhBl', 'BhBl', 2),
+    ('BlBh', 'BlBh', 2),
+    ('nedozpivany_s_B', 'Unfinished', 9),
+    ('nedozpivany_bez_B', 'Unfinished', 0),
+]
+
+
+def element_runs(model, spectrogram):
+    """The tagged elements of one window [(name, start_s, end_s), ...] and the per-frame tag
+    probabilities (frames, tags)."""
+    from losses.element_ctc import FRAME_TAGS, decode_frame_tags
+
+    with torch.no_grad():
+        logits = model(spectrogram[None])['element_logits'][0].float()  # (tags, frames)
+    probabilities = logits.softmax(0).T.cpu().numpy()
+    frame_seconds = 4.0 / probabilities.shape[0]
+    runs = [
+        (name, first * frame_seconds, end * frame_seconds)
+        for name, first, end in decode_frame_tags(logits.argmax(0).cpu().numpy())
+    ]
+    assert len(FRAME_TAGS) == probabilities.shape[1]
+    return runs, probabilities
+
+
+def frames_picture(out, name, model, clip, device):
+    """One clip. Top: the spectrogram with every tagged element as a bar over its whole length in a
+    strip above it. Bottom: the probability of every element tag in every 40 ms frame. Returns the
+    element names as shown."""
+    from evaluation.element_sequences import TOKEN_COLOURS
+    from losses.element_ctc import FRAME_TAGS, whistle_names
+
+    spectrogram = clip_spectrogram(model, clip, device)
+    runs, probabilities = element_runs(model, spectrogram)
+    shown_names = whistle_names([element for element, _, _ in runs])
+    picture = spectrogram[0].cpu().numpy()
+    n_bins = picture.shape[0]
+    frame_seconds = 4.0 / probabilities.shape[0]
+    time = (np.arange(probabilities.shape[0]) + 0.5) * frame_seconds
+    strip = 1.17
+
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(HALF, 2.35), sharex=True, gridspec_kw={'height_ratios': [2.1, 1]}
+    )
+    top.imshow(
+        picture,
+        origin='lower',
+        aspect='auto',
+        extent=[0, 4.0, 0, n_bins],
+        cmap='magma',
+        vmin=0,
+        vmax=2,
+    )
+    top.set_ylim(0, n_bins * strip)
+    for (element, start, end), shown in zip(runs, shown_names):
+        top.axvspan(start, end, ymin=1 / strip, ymax=1.0, color=TOKEN_COLOURS[element])
+        if end - start >= 0.12:
+            top.text(
+                (start + end) / 2,
+                n_bins * (1 + strip) / 2,
+                TOKEN_LETTER.get(shown, shown),
+                ha='center',
+                va='center',
+                fontsize=7.5,
+            )
+    ticks, tick_labels = frequency_ticks(
+        (model.frontend.bank.fmin, model.frontend.bank.fmax), n_bins
+    )
+    keep = [index for index, label in enumerate(tick_labels) if label in ('2', '4', '8')]
+    top.set_yticks([ticks[index] for index in keep], [tick_labels[index] for index in keep])
+    top.set_ylabel('kHz')
+
+    for index, tag in enumerate(FRAME_TAGS):
+        if index and probabilities[:, index].max() > 0.05:
+            bottom.plot(time, probabilities[:, index], color=TOKEN_COLOURS[tag], lw=1.1)
+    bottom.set_ylim(0, 1.1)
+    bottom.set_yticks([0, 1])
+    bottom.set_xlim(0, 4.0)
+    bottom.set_xticks([0, 1, 2, 3, 4])
+    bottom.set_xlabel('čas (s)')
+    bottom.set_ylabel('pravděp.')
+    bottom.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4, h_pad=0.6)
+    save(fig, out, name)
+    return shown_names
+
+
+@figure
+def useky_prvku(out):
+    """The per-frame element tags on six held-out clips: `useky_<name>.svg`. The tagged elements
+    are printed, for the captions."""
+    from losses.element_ctc import STRNADI_GRAMMAR, canonical_elements
+
+    predictions = load_run_predictions(FRAMES_RUN)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    fold_models = FoldModels(FRAMES_RUN, device)
+    for name, label, rank in FRAMES_EXAMPLES:
+        of_class = predictions[(predictions.label == label) & predictions.correct]
+        found = 0
+        for clip in of_class.sort_values(f'p_{label}', ascending=False).itertuples():
+            model = fold_models.get(clip.cv_fold)
+            runs, _ = element_runs(model, clip_spectrogram(model, clip, device))
+            names = canonical_elements([element for element, _, _ in runs])
+            if STRNADI_GRAMMAR.class_of_sequence(names) != label:
+                continue
+            if name == 'nedozpivany_bez_B' and names != ['phrase']:
+                continue
+            if name == 'nedozpivany_s_B' and names != ['phrase', 'B']:
+                continue
+            if found == rank:
+                shown = frames_picture(out, f'useky_{name}', model, clip, device)
+                print(f'elements of {name} ({clip.name}): {" ".join(shown)}', file=sys.stderr)
+                break
+            found += 1
 
 
 def main():

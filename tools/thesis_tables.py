@@ -34,6 +34,26 @@ GROUPS = [
         ],
     ),
     (
+        'Srovnání hlavních receptů (výsledná verze označení, tři semínka)',
+        [
+            (f'{run}{seed}', f'{description}, {order} semínko')
+            for run, description in [
+                ('final_reference', 'výchozí recept'),
+                ('final_combined', 'kombinovaný recept'),
+                ('final_combined_430k', 'kombinovaný recept, síť 0,43 M'),
+                ('final_combined_190k', 'kombinovaný recept, síť 0,19 M'),
+                ('final_combined_170k_half_resolution', 'kombinovaný recept, poloviční rozlišení'),
+                ('final_field_ready', 'nasazený recept s oběma změnami'),
+            ]
+            for seed, order in [('', 'první'), ('_s1', 'druhé'), ('_s2', 'třetí')]
+        ]
+        + [
+            ('final_combined_tuned', 'kombinovaný recept s nastavením z ladění'),
+            ('final_combined_40_epochs', 'kombinovaný recept, 40 epoch'),
+            ('tuned_reference', 'výchozí recept s nastavením z ladění'),
+        ],
+    ),
+    (
         'Velikost a rychlost vlastní sítě',
         [
             ('size_strnadnet_190k', 'nejmenší síť'),
@@ -105,6 +125,9 @@ GROUPS = [
             ('element_sequence_ctc', 'výstup posloupnosti prvků (CTC)'),
             ('element_sequence_discriminative', 'posloupnost prvků, třídy soutěží'),
             ('element_sequence_anchored', 'posloupnost prvků ukotvená časy od ornitologů'),
+            ('element_sequence_ctc_bh_bl', 'posloupnost prvků s hvizdy pojmenovanými Bh a Bl'),
+            ('element_frames_from_tones', 'úseky prvků, hvizdy pojmenované relativně (B, L, H)'),
+            ('element_frames_bh_bl_tags', 'úseky prvků, hvizdy pojmenované Bh a Bl'),
         ],
     ),
     (
