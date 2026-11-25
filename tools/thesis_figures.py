@@ -771,7 +771,7 @@ def sequence_picture(out, name, model, clip, device):
     it, each at the time the token was emitted. Bottom: the probability of every element token
     in every 40 ms frame (what the CTC output looks like). Returns the decoded token names."""
     from evaluation.element_sequences import TOKEN_COLOURS
-    from losses.element_ctc import TOKENS, decode_tokens
+    from losses.element_ctc import TOKENS, decode_tokens, whistle_names
 
     spectrogram = clip_spectrogram(model, clip, device)
     with torch.no_grad():
@@ -797,22 +797,28 @@ def sequence_picture(out, name, model, clip, device):
         vmax=2,
     )
     top.set_ylim(0, n_bins * strip)
+    # the two whistles of BhBl / BlBh are shown under the names ornithologists use
+    shown_names = whistle_names([token for token, _, _ in spans[0]])
     box_centre = -1.0
-    for token, first_frame, last_frame in spans[0]:
+    for (token, first_frame, last_frame), shown in zip(spans[0], shown_names):
         emitted = (first_frame + last_frame + 1) / 2 * frame_seconds
         # boxes of tokens emitted in neighbouring frames are drawn side by side, not on top of
         # each other, and the first and last stay inside the picture
-        box_centre = min(max(emitted, box_centre + 0.2, 0.1), 3.9)
+        box_centre = min(max(emitted, box_centre + 0.26, 0.13), 3.87)
         top.axvspan(
-            box_centre - 0.1, box_centre + 0.1, ymin=1 / strip, ymax=1.0, color=TOKEN_COLOURS[token]
+            box_centre - 0.13,
+            box_centre + 0.13,
+            ymin=1 / strip,
+            ymax=1.0,
+            color=TOKEN_COLOURS[token],
         )
         top.text(
             box_centre,
             n_bins * (1 + strip) / 2,
-            TOKEN_LETTER.get(token, token),
+            TOKEN_LETTER.get(shown, shown),
             ha='center',
             va='center',
-            fontsize=8,
+            fontsize=7.5,
         )
     ticks, tick_labels = frequency_ticks(
         (model.frontend.bank.fmin, model.frontend.bank.fmax), n_bins
@@ -833,7 +839,7 @@ def sequence_picture(out, name, model, clip, device):
     bottom.spines[['top', 'right']].set_visible(False)
     fig.tight_layout(pad=0.4, h_pad=0.6)
     save(fig, out, name)
-    return sequences[0]
+    return shown_names
 
 
 @figure
