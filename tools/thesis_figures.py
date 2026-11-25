@@ -972,7 +972,6 @@ def pravidlo_useku(out):
     the sustained tones the rule finds (white lines at their pitch) and the elements assigned to
     them from the clip's label (bars above): `pravidlo_<name>.svg`."""
     from evaluation.element_sequences import TOKEN_COLOURS
-    from losses.element_ctc import whistle_names
     from processing.build_element_spans_from_tones import (
         BIN_HZ,
         FRAME_SECONDS,
@@ -1017,7 +1016,7 @@ def pravidlo_useku(out):
                 color='white',
                 lw=1.0,
             )
-        shown = whistle_names([element for element, _, _ in spans])
+        shown = [element for element, _, _ in spans]
         for (element, start, end), shown_name in zip(spans, shown):
             ax.axvspan(start, end, ymin=1 / strip, ymax=1.0, color=TOKEN_COLOURS[element])
             if end - start >= 0.12:
@@ -1210,6 +1209,101 @@ def pevna_mapa(out):
     )
 
 
+@figure
+def vyska_hvizdu(out):
+    """How high are the whistles? For every labelled clip where the span rule found the elements,
+    the median pitch of the loudest band inside the B span, and inside the second whistle of BhBl
+    and BlBh: `vyska_B.svg` (B by class) and `vyska_dvojice.svg` (first and second whistle of every
+    BhBl and BlBh song, joined by a line). Numbers go to results/whistle_pitch.json."""
+    from processing.build_element_spans_from_tones import (
+        BIN_HZ,
+        FRAME_SECONDS,
+        Spectrograms,
+        element_spans,
+        labelled_window_start,
+    )
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    spectrograms = Spectrograms(device)
+    in_band = (BIN_HZ >= 2300) & (BIN_HZ <= 9800)
+    band_hz = BIN_HZ[in_band] / 1000
+
+    def pitch(picture, start, end):
+        first = int(round(start / FRAME_SECONDS))
+        last = max(int(round(end / FRAME_SECONDS)), first + 1)
+        return float(np.median(band_hz[picture[in_band][:, first:last].argmax(0)]))
+
+    rows = []
+    for clip in read_table('data/clips_audited.csv').itertuples():
+        picture = spectrograms(clip.npy, labelled_window_start(clip))
+        spans = element_spans(picture, clip.label) or []
+        row = {'label': clip.label}
+        for element, start, end in spans:
+            if element == 'B' and 'B' not in row:
+                row['B'] = pitch(picture, start, end)
+            if element in ('L', 'H') and 'second' not in row:
+                row['second'] = pitch(picture, start, end)
+        if 'B' in row:
+            rows.append(row)
+    table = pd.DataFrame(rows)
+    order = ['BC', 'BE', 'XB', 'Unfinished', 'BhBl', 'BlBh']
+    summary = {
+        name: {
+            'clips': int((table.label == name).sum()),
+            'B_median_khz': float(table.B[table.label == name].median()),
+            'second_median_khz': float(table.second[table.label == name].median())
+            if name in ('BhBl', 'BlBh')
+            else None,
+        }
+        for name in order
+    }
+    with open(f'{WS}/results/whistle_pitch.json', 'w') as file:
+        json.dump(summary, file, indent=1)
+
+    rng = np.random.default_rng(0)
+    fig, ax = plt.subplots(figsize=(HALF, 2.4))
+    for position, name in enumerate(order):
+        values = table.B[table.label == name].values
+        if len(values) > 250:
+            values = rng.choice(values, 250, replace=False)
+        ax.scatter(
+            position + rng.uniform(-0.28, 0.28, len(values)),
+            values,
+            s=2.5,
+            color=COLOURS[name],
+            alpha=0.7,
+            linewidths=0,
+        )
+        median = table.B[table.label == name].median()
+        ax.plot([position - 0.34, position + 0.34], [median] * 2, color='k', lw=1.4)
+    ax.set_xticks(range(len(order)), [CZECH[name] for name in order], rotation=30, ha='right')
+    ax.set_ylim(3.0, 7.5)
+    comma_ticks(ax, 'y', 1, [3, 4, 5, 6, 7])
+    ax.set_ylabel('výška hvizdu B (kHz)')
+    ax.grid(axis='y', color='#e3e3e3', lw=0.6)
+    ax.set_axisbelow(True)
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'vyska_B')
+
+    fig, ax = plt.subplots(figsize=(HALF, 2.4))
+    for name in ('BhBl', 'BlBh'):
+        pairs = table[(table.label == name) & table.second.notna()]
+        for first, second in zip(pairs.B, pairs.second):
+            ax.plot([0, 1], [first, second], color=COLOURS[name], alpha=0.5, lw=0.8)
+    ax.set_xticks([0, 1], ['první hvizd (B)', 'druhý hvizd'])
+    ax.set_xlim(-0.15, 1.15)
+    ax.set_ylim(3.0, 7.5)
+    comma_ticks(ax, 'y', 1, [3, 4, 5, 6, 7])
+    ax.set_ylabel('výška (kHz)')
+    ax.grid(axis='y', color='#e3e3e3', lw=0.6)
+    ax.set_axisbelow(True)
+    ax.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4)
+    save(fig, out, 'vyska_dvojice')
+    print(f'whistle pitch: {summary}', file=sys.stderr)
+
+
 #: Clips that all 18 runs of the final comparison classify wrongly, one per group of the error
 #: table in the thesis, picked by eye from the 32 such clips: (file name part, clip).
 ERROR_EXAMPLES = [
@@ -1322,7 +1416,7 @@ def sequence_picture(out, name, model, clip, device):
     it, each at the time the token was emitted. Bottom: the probability of every element token
     in every 40 ms frame (what the CTC output looks like). Returns the decoded token names."""
     from evaluation.element_sequences import TOKEN_COLOURS
-    from losses.element_ctc import TOKENS, decode_tokens, whistle_names
+    from losses.element_ctc import TOKENS, decode_tokens
 
     spectrogram = clip_spectrogram(model, clip, device)
     with torch.no_grad():
@@ -1348,8 +1442,8 @@ def sequence_picture(out, name, model, clip, device):
         vmax=2,
     )
     top.set_ylim(0, n_bins * strip)
-    # the two whistles of BhBl / BlBh are shown under the names ornithologists use
-    shown_names = whistle_names([token for token, _, _ in spans[0]])
+    # the whistles keep the network's names: B, then L (lower) or H (higher) than the B before
+    shown_names = [token for token, _, _ in spans[0]]
     box_centre = -1.0
     for (token, first_frame, last_frame), shown in zip(spans[0], shown_names):
         emitted = (first_frame + last_frame + 1) / 2 * frame_seconds
@@ -1446,11 +1540,11 @@ def frames_picture(out, name, model, clip, device):
     strip above it. Bottom: the probability of every element tag in every 40 ms frame. Returns the
     element names as shown."""
     from evaluation.element_sequences import TOKEN_COLOURS
-    from losses.element_ctc import FRAME_TAGS, whistle_names
+    from losses.element_ctc import FRAME_TAGS
 
     spectrogram = clip_spectrogram(model, clip, device)
     runs, probabilities = element_runs(model, spectrogram)
-    shown_names = whistle_names([element for element, _, _ in runs])
+    shown_names = [element for element, _, _ in runs]
     picture = spectrogram[0].cpu().numpy()
     n_bins = picture.shape[0]
     frame_seconds = 4.0 / probabilities.shape[0]
