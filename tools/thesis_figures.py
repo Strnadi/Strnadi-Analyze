@@ -728,70 +728,107 @@ def kontrafakt(out):
 
 
 # --------------------------------------------------------------------------- element sequences
-TOKEN_CZECH = {'phrase': 'fráze'}
+#: The run whose element-token output is drawn.
 SEQUENCE_RUN = os.environ.get('THESIS_SEQUENCE_RUN', 'element_sequence_ctc')
-SEQUENCE_RANK = {'XB': 5, 'BC': 5, 'BhBl': 5, 'Unfinished': 5}
+#: Letter drawn at a decoded token ("F" stands for the phrase, "fráze").
+TOKEN_LETTER = {'phrase': 'F'}
+#: The clips shown: (file name part, class, rank by confidence among the correctly classified
+#: clips of the class). Picked by eye from the first twelve of each class: four songs whose
+#: tokens land on their elements, and two that show the limits (a phrase-only song decoded with a
+#: B it does not have; a window with the end of one song and the start of the next).
+SEQUENCE_EXAMPLES = [
+    ('XB', 'XB', 1),
+    ('BC', 'BC', 6),
+    ('BhBl', 'BhBl', 10),
+    ('nedozpivany_s_B', 'Unfinished', 9),
+    ('nedozpivany_bez_B', 'Unfinished', 0),
+    ('dva_zpevy', 'BC', 5),
+]
+
+
+def sequence_picture(out, name, model, clip, device):
+    """One clip. Top: its spectrogram with the decoded tokens as coloured boxes in a strip above
+    it, each at the time the token was emitted. Bottom: the probability of every element token
+    in every 40 ms frame (what the CTC output looks like). Returns the decoded token names."""
+    from evaluation.element_sequences import TOKEN_COLOURS
+    from losses.element_ctc import TOKENS, decode_tokens
+
+    spectrogram = clip_spectrogram(model, clip, device)
+    with torch.no_grad():
+        token_log_probs = model(spectrogram[None])['token_log_probs']
+    probabilities = token_log_probs[0].exp().cpu().numpy()  # (frames, tokens), token 0 = blank
+    sequences, spans = decode_tokens(token_log_probs)
+    picture = spectrogram[0].cpu().numpy()
+    n_bins = picture.shape[0]
+    frame_seconds = 4.0 / len(probabilities)
+    time = (np.arange(len(probabilities)) + 0.5) * frame_seconds
+    strip = 1.17  # the axis is this much taller than the spectrogram: room for the token strip
+
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(HALF, 2.35), sharex=True, gridspec_kw={'height_ratios': [2.1, 1]}
+    )
+    top.imshow(
+        picture,
+        origin='lower',
+        aspect='auto',
+        extent=[0, 4.0, 0, n_bins],
+        cmap='magma',
+        vmin=0,
+        vmax=2,
+    )
+    top.set_ylim(0, n_bins * strip)
+    box_centre = -1.0
+    for token, first_frame, last_frame in spans[0]:
+        emitted = (first_frame + last_frame + 1) / 2 * frame_seconds
+        # boxes of tokens emitted in neighbouring frames are drawn side by side, not on top of
+        # each other, and the first and last stay inside the picture
+        box_centre = min(max(emitted, box_centre + 0.2, 0.1), 3.9)
+        top.axvspan(
+            box_centre - 0.1, box_centre + 0.1, ymin=1 / strip, ymax=1.0, color=TOKEN_COLOURS[token]
+        )
+        top.text(
+            box_centre,
+            n_bins * (1 + strip) / 2,
+            TOKEN_LETTER.get(token, token),
+            ha='center',
+            va='center',
+            fontsize=8,
+        )
+    ticks, tick_labels = frequency_ticks(
+        (model.frontend.bank.fmin, model.frontend.bank.fmax), n_bins
+    )
+    keep = [index for index, label in enumerate(tick_labels) if label in ('2', '4', '8')]
+    top.set_yticks([ticks[index] for index in keep], [tick_labels[index] for index in keep])
+    top.set_ylabel('kHz')
+
+    for index, token in enumerate(TOKENS):
+        if index:
+            bottom.plot(time, probabilities[:, index], color=TOKEN_COLOURS[token], lw=1.1)
+    bottom.set_ylim(0, 1.1)
+    bottom.set_yticks([0, 1])
+    bottom.set_xlim(0, 4.0)
+    bottom.set_xticks([0, 1, 2, 3, 4])
+    bottom.set_xlabel('čas (s)')
+    bottom.set_ylabel('pravděp.')
+    bottom.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout(pad=0.4, h_pad=0.6)
+    save(fig, out, name)
+    return sequences[0]
 
 
 @figure
 def sekvence_elementu(out):
-    """Decoded element tokens over the spectrograms of four held-out clips:
-    `sekvence_<class>.svg`. The decoded sequences are printed, for the captions."""
-    from evaluation.element_sequences import TOKEN_COLOURS, decode_held_out
-
+    """The element-token output on six held-out clips: `sekvence_<name>.svg`. The decoded
+    sequences are printed, for the captions."""
     predictions = load_run_predictions(SEQUENCE_RUN)
-    chosen = []
-    for name in ['XB', 'BC', 'BhBl', 'Unfinished']:
-        of_class = predictions[(predictions.label == name) & predictions.correct]
-        ranked = of_class.sort_values(f'p_{name}', ascending=False)
-        chosen.append(ranked.iloc[[SEQUENCE_RANK[name]]])
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     fold_models = FoldModels(SEQUENCE_RUN, device)
-    decoded = decode_held_out(pd.concat(chosen), fold_models)
-
-    for clip in decoded.itertuples():
+    for name, label, rank in SEQUENCE_EXAMPLES:
+        of_class = predictions[(predictions.label == label) & predictions.correct]
+        clip = of_class.sort_values(f'p_{label}', ascending=False).iloc[rank]
         model = fold_models.get(clip.cv_fold)
-        picture = clip_spectrogram(model, clip, device)[0].cpu().numpy()
-        n_bins = picture.shape[0]
-        fig, ax = plt.subplots(figsize=(HALF, 1.9))
-        ax.imshow(
-            picture,
-            origin='lower',
-            aspect='auto',
-            extent=[0, 4.0, 0, n_bins],
-            cmap='magma',
-            vmin=0,
-            vmax=2,
-        )
-        ax.set_ylim(0, n_bins * 1.14)
-        ax.set_xlim(0, 4.0)
-        for token, first_frame, last_frame in clip.spans:
-            start, end = first_frame * 0.04, (last_frame + 1) * 0.04
-            centre = (start + end) / 2
-            ax.axvspan(
-                centre - 0.09, centre + 0.09, ymin=1 / 1.14, ymax=1.0, color=TOKEN_COLOURS[token]
-            )
-            ax.text(
-                centre,
-                n_bins * 1.07,
-                TOKEN_CZECH.get(token, token)[0].upper(),
-                ha='center',
-                va='center',
-                fontsize=7,
-            )
-        ticks, tick_labels = frequency_ticks(
-            (model.frontend.bank.fmin, model.frontend.bank.fmax), n_bins
-        )
-        keep = [index for index, label in enumerate(tick_labels) if label in ('2', '4', '8')]
-        ax.set_yticks([ticks[index] for index in keep], [tick_labels[index] for index in keep])
-        ax.set_ylabel('kHz')
-        ax.set_xlabel('čas (s)')
-        fig.tight_layout(pad=0.4)
-        save(fig, out, f'sekvence_{SLUG[clip.label]}')
-        print(
-            f'sequence of the {clip.label} clip: {clip.tokens} -> {clip.sequence_class}',
-            file=sys.stderr,
-        )
+        tokens = sequence_picture(out, f'sekvence_{name}', model, clip, device)
+        print(f'sequence of {name} ({clip.name}): {" ".join(tokens)}', file=sys.stderr)
 
 
 def main():
